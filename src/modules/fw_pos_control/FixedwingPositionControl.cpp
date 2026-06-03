@@ -2290,7 +2290,8 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 
 	// 阶段2→3：地速为零后鸭翼归零锁存
 	if (_canard_touchdown_phase == 2) {
-		if (ground_speed.norm() < 0.5f) {
+		// 使用 PX4_ISFINITE 安全过滤，防止GPS丢星导致NaN卡死状态机
+		if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < 0.5f) {
 			_canard_setpoint = 0.5f;
 			_canard_deployed = false;
 			_canard_braked = false;
