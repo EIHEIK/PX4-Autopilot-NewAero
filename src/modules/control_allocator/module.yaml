@@ -278,6 +278,8 @@ parameters:
                 16: Steering Wheel
                 17: Left Spoiler
                 18: Right Spoiler
+                19: Left Canard
+                20: Right Canard
             num_instances: *max_num_servos
             instance_start: 0
             default: 0
@@ -343,6 +345,17 @@ parameters:
             instance_start: 0
             default: 0
 
+        CA_SV_CS${i}_CANARD:
+            description:
+                short: Control Surface ${i} configuration as canard
+            type: float
+            decimal: 2
+            min: -1.0
+            max: 1.0
+            num_instances: *max_num_servos
+            instance_start: 0
+            default: 0
+
         # Tilts
         CA_SV_TL_COUNT:
             description:
@@ -359,7 +372,7 @@ parameters:
             description:
                 short: Tilt ${i} is used for control
                 long: Define if this servo is used for additional control.
-            type: enum # This could be a bitset, but the enum shows up nicer in the UI
+            type: enum # This could be a bitset, but the enum shows up nicer
             values:
                 0: 'None'
                 1: 'Yaw'
@@ -630,7 +643,7 @@ mixer:
 
     rules:
       - select_identifier: 'servo-type' # restrict torque based on servo type
-        apply_identifiers: ['servo-torque-roll', 'servo-torque-pitch', 'servo-torque-yaw', 'servo-scale-flap', 'servo-scale-spoiler']
+        apply_identifiers: ['servo-torque-roll', 'servo-torque-pitch', 'servo-torque-yaw', 'servo-scale-flap', 'servo-scale-spoiler', 'servo-scale-canard']
         items:
         # Convention: horizontal surfaces: up=positive, vertical: right=positive, mixed: up=positive.
         # By default the scale is set to 1/N, where N is the amount of actuators with an effect on
@@ -641,114 +654,147 @@ mixer:
               - { 'disabled': True, 'default': 0.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             1: # Left Aileron
               - { 'min': -1.0, 'max': 0.0, 'default': -0.5 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             2: # Right Aileron
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             3: # Elevator
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 1.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             4: # Rudder
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'min': 0.0, 'max': 1.0, 'default': 1.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             5: # Left Elevon
               - { 'min': -1.0, 'max': 0.0, 'default': -0.5 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             6: # Right Elevon
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             7: # Left V Tail
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             8: # Right V Tail
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'min': -1.0, 'max': 0.0, 'default': -0.5 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             9: # Left Flap
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             10: # Right Flap
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             11: # Airbrake
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             12: # Custom
               - { 'hidden': False, 'default': 0.0 } # roll
               - { 'hidden': False, 'default': 0.0 } # pitch
               - { 'hidden': False, 'default': 0.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             13: # Left A Tail
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'min': -1.0, 'max': 0.0, 'default': -0.5 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             14: # Right A Tail
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # pitch
               - { 'min': 0.0, 'max': 1.0, 'default': 0.5 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             15: # Single Channel Aileron
               - { 'min': 0.0, 'max': 1.0, 'default': 1.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             16: # Steering Wheel
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             17: # Left Spoiler
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
             18: # Right Spoiler
               - { 'hidden': True, 'default': 0.0 } # roll
               - { 'hidden': True, 'default': 0.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # spoiler
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # canard
+            19: # Left Canard
+              - { 'hidden': True, 'default': 0.0 } # roll
+              - { 'hidden': True, 'default': 0.0 } # pitch
+              - { 'hidden': True, 'default': 0.0 } # yaw
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # canard
+            20: # Right Canard
+              - { 'hidden': True, 'default': 0.0 } # roll
+              - { 'hidden': True, 'default': 0.0 } # pitch
+              - { 'hidden': True, 'default': 0.0 } # yaw
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
+              - { 'hidden': True, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
+              - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 1} # canard
 
 
       - select_identifier: 'servo-type-tailsitter' # restrict torque based on servo type for tailsitters
@@ -829,6 +875,10 @@ mixer:
                             label: 'Spoiler Scale'
                             advanced: true
                             identifier: 'servo-scale-spoiler'
+                          - name: 'CA_SV_CS${i}_CANARD'
+                            label: 'Canard Scale'
+                            advanced: true
+                            identifier: 'servo-scale-canard'
 
             2: # Standard VTOL
                 title: 'Standard VTOL'
@@ -881,6 +931,10 @@ mixer:
                             label: 'Spoiler Scale'
                             advanced: true
                             identifier: 'servo-scale-spoiler'
+                          - name: 'CA_SV_CS${i}_CANARD'
+                            label: 'Canard Scale'
+                            advanced: true
+                            identifier: 'servo-scale-canard'
                     parameters:
                       - label: 'Lock control surfaces in hover'
                         name: VT_ELEV_MC_LOCK
@@ -930,6 +984,10 @@ mixer:
                             label: 'Spoiler Scale'
                             advanced: true
                             identifier: 'servo-scale-spoiler'
+                          - name: 'CA_SV_CS${i}_CANARD'
+                            label: 'Canard Scale'
+                            advanced: true
+                            identifier: 'servo-scale-canard'
                     parameters:
                       - label: 'Lock control surfaces in hover'
                         name: VT_ELEV_MC_LOCK
@@ -991,6 +1049,10 @@ mixer:
                             label: 'Spoiler Scale'
                             advanced: true
                             identifier: 'servo-scale-spoiler'
+                          - name: 'CA_SV_CS${i}_CANARD'
+                            label: 'Canard Scale'
+                            advanced: true
+                            identifier: 'servo-scale-canard'
                     parameters:
                       - label: 'Lock control surfaces in hover'
                         name: VT_ELEV_MC_LOCK
@@ -1111,6 +1173,10 @@ mixer:
                             label: 'Spoiler Scale'
                             advanced: true
                             identifier: 'servo-scale-spoiler'
+                          - name: 'CA_SV_CS${i}_CANARD'
+                            label: 'Canard Scale'
+                            advanced: true
+                            identifier: 'servo-scale-canard'
 
             10: # Helicopter (tail ESC)
                 actuators:

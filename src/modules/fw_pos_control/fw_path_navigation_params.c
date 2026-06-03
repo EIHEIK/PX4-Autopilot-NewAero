@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2023 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2023 Px4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -952,3 +952,65 @@ PARAM_DEFINE_FLOAT(FW_FLAPS_LND_SCL, 1.0f);
  * @group FW Attitude Control
  */
 PARAM_DEFINE_FLOAT(FW_SPOILERS_LND, 0.f);
+
+/**
+ * Canard deflection during takeoff and cruise
+ *
+ * Sets the normalized canard setting for takeoff and cruise.
+ * [0,1] → 舵机 [-1,1]: 0.5=中立, >0.5=后缘下偏(抬头), <0.5=后缘上偏(低头)
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_TO, 0.5f);
+
+/**
+ * Canard airbrake upward deflection
+ *
+ * 着陆气动刹车阶段鸭翼后缘上偏量 [0,1]。
+ * 0=中立, 1=后缘极限上偏(空气刹车)。
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_BRK, 1.0f);
+
+/**
+ * Canard landing retraction height threshold
+ *
+ * When the distance from the bottom of the vehicle to the ground is below
+ * this threshold and the normal load factor exceeds FW_CANARD_LND_NZ,
+ * the canard is retracted to 0.
+ *
+ * @unit m
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_LND_H, 0.1f);
+
+/**
+ * Canard landing retraction normal load factor threshold
+ *
+ * Normal load factor (body-Z acceleration / g) above which the canard
+ * is retracted when also below FW_CANARD_LND_H. Used to detect
+ * main gear touchdown during landing.
+ *
+ * @unit m/s^2
+ * @min 0.5
+ * @max 5.0
+ * @decimal 1
+ * @increment 0.1
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_LND_NZ, 1.5f);

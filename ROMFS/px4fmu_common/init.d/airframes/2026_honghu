@@ -1,0 +1,209 @@
+# #!/bin/sh
+# #
+# # @name Canard Honghu Wing Fixed-Wing
+# #
+# # @type Plane with Canards
+# # @class Plane
+# #
+# # @output Motor1 throttle
+# # @output Servo1 canard left
+# # @output Servo2 canard right
+# # @output Servo3 aileron left
+# # @output Servo4 aileron right
+# # @output Servo5 elevator left
+# # @output Servo6 elevator right
+# # @output Servo7 rudder left
+# # @output Servo8 rudder right
+# #
+# # @maintainer <your-email>
+# #
+
+# . ${R}etc/init.d/rc.fw_defaults
+
+# # ---------------------------------------------------------------------------
+# # Airframe geometry & control surface count
+# # ---------------------------------------------------------------------------
+# param set-default CA_AIRFRAME 1
+# param set-default CA_ROTOR_COUNT 1
+# param set-default CA_SV_CS_COUNT 8
+
+# # ---------------------------------------------------------------------------
+# # Control surface definitions
+# # ---------------------------------------------------------------------------
+
+# # 0: Left Canard -- 前置鸭翼（控制俯仰，力矩符号与传统尾翼相反,）
+# param set-default CA_SV_CS0_TYPE  19
+# param set-default CA_SV_CS0_TRQ_P -0.5
+# param set-default CA_SV_CS0_CANARD 1.0
+
+# # 1: Right Canard -- 前置鸭翼（控制俯仰，力矩符号与传统尾翼相反）
+# param set-default CA_SV_CS1_TYPE  20
+# param set-default CA_SV_CS1_TRQ_P -0.5
+# param set-default CA_SV_CS1_CANARD 1.0
+
+# # 2: Left Aileron -- 左副翼（控制滚转）
+# param set-default CA_SV_CS2_TYPE  1
+# param set-default CA_SV_CS2_TRQ_R -0.5
+
+# # 3: Right Aileron -- 右副翼（控制滚转）
+# param set-default CA_SV_CS3_TYPE  2
+# param set-default CA_SV_CS3_TRQ_R 0.5
+
+# # 4: Left Elevator -- 左升降舵（后方常规尾翼，控制俯仰）
+# param set-default CA_SV_CS4_TYPE  3
+# param set-default CA_SV_CS4_TRQ_P 0.5
+
+# # 5: Right Elevator -- 右升降舵（后方常规尾翼，控制俯仰）
+# param set-default CA_SV_CS5_TYPE  3
+# param set-default CA_SV_CS5_TRQ_P 0.5
+
+# # 6: Left Rudder -- 左方向舵（后方常规航向控制）
+# param set-default CA_SV_CS6_TYPE  4
+# param set-default CA_SV_CS6_TRQ_Y 0.5
+
+# # 7: Right Rudder -- 右方向舵（后方常规航向控制，符号需与左方向舵一致以协同偏转）
+# param set-default CA_SV_CS7_TYPE  4
+# param set-default CA_SV_CS7_TRQ_Y 0.5
+
+# # ---------------------------------------------------------------------------
+# # PWM output mapping
+# # ---------------------------------------------------------------------------
+# param set-default PWM_MAIN_FUNC1 101
+# param set-default PWM_MAIN_FUNC2 201
+# param set-default PWM_MAIN_FUNC3 202
+# param set-default PWM_MAIN_FUNC4 203
+# param set-default PWM_MAIN_FUNC5 204
+# param set-default PWM_MAIN_FUNC6 205
+# param set-default PWM_MAIN_FUNC7 206
+# param set-default PWM_MAIN_FUNC8 207
+# param set-default PWM_MAIN_FUNC9 208
+
+# # ---------------------------------------------------------------------------
+# # PWM timer configuration (50 Hz for servos)
+# # ---------------------------------------------------------------------------
+# param set-default PWM_MAIN_TIM0 50
+# param set-default PWM_MAIN_TIM1 50
+# param set-default PWM_MAIN_TIM2 50
+
+# # ---------------------------------------------------------------------------
+# # Disarmed PWM values (us)
+# # ---------------------------------------------------------------------------
+# param set-default PWM_MAIN_DIS0 1000
+# param set-default PWM_MAIN_DIS1 1500
+# param set-default PWM_MAIN_DIS2 1500
+# param set-default PWM_MAIN_DIS3 1500
+# param set-default PWM_MAIN_DIS4 1500
+# param set-default PWM_MAIN_DIS5 1500
+# param set-default PWM_MAIN_DIS6 1500
+# param set-default PWM_MAIN_DIS7 1500
+# param set-default PWM_MAIN_DIS8 1500
+
+# # ---------------------------------------------------------------------------
+# # Canard parameters
+# # ---------------------------------------------------------------------------
+# param set-default FW_CANARD_TO         0.5  # 后缘下偏(0=中立,1=极限)
+# param set-default FW_CANARD_BRK   1.0  # 后缘上偏(0=中立,1=极限)
+# param set-default FW_CANARD_LND_H      0.1  # 接地高度阈值 [m]
+# param set-default FW_CANARD_LND_NZ     1.5  # 接地法向过载阈值 [g]
+#!/bin/sh
+#
+# @name Canard Honghu Wing Fixed-Wing (Gazebo SITL Adaption)
+#
+# @type Plane with Canards
+# @class Plane
+#
+# @output Motor1 throttle
+# @output Servo1 canard left   (Mapped to Gazebo SV1)
+# @output Servo2 canard right  (Mapped to Gazebo SV2)
+# @output Servo3 aileron left  (Mapped to Gazebo SV3)
+# @output Servo4 aileron right (Mapped to Gazebo SV4)
+# @output Servo5 elevator left (Mapped to Gazebo SV5)
+# @output Servo6 elevator right(Mapped to Gazebo SV6)
+#
+
+. ${R}etc/init.d/rc.fw_defaults
+
+# ---------------------------------------------------------------------------
+# 仿真环境核心配置（直接拷贝师哥的基线）
+# ---------------------------------------------------------------------------
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=honghu_wing}
+
+param set-default SIM_GZ_EN 1
+param set-default SENS_EN_GPSSIM 1
+param set-default SENS_EN_MAGSIM 1
+param set-default SENS_EN_ARSPDSIM 1
+
+# 采用师哥微调过的空速与安全门限（保证仿真不翻滚、不超速）
+param set-default FW_AIRSPD_MAX 28
+param set-default FW_AIRSPD_MIN 10
+param set-default FW_AIRSPD_STALL 8
+param set-default FW_AIRSPD_TRIM 16
+param set-default MIS_TAKEOFF_ALT 35
+param set-default NAV_LOITER_RAD 100
+param set-default FW_LND_ANG 5
+param set-default FW_LND_USETER 0
+param set-default FW_LND_ABORT 0
+param set-default RWTO_TKOFF 1
+param set-default FW_W_EN 1
+
+# ---------------------------------------------------------------------------
+# 拓扑几何定义（你的核心：定义为 6 个控制面，将前两个留给鸭翼）
+# ---------------------------------------------------------------------------
+param set-default CA_AIRFRAME 1
+param set-default CA_ROTOR_COUNT 1
+param set-default CA_ROTOR0_PX -0.75
+param set-default CA_SV_CS_COUNT 6    # 适配 Gazebo 的 6 舵面物理模型
+
+# ---------------------------------------------------------------------------
+# 控制分配器映射（激活你的 applyCanard 逻辑！）
+# ---------------------------------------------------------------------------
+# 0: 左鸭翼 -- 告诉飞控它是鸭翼，从而进入你的 applyCanard 双向映射
+param set-default CA_SV_CS0_TYPE  19   # Type::LeftCanard
+param set-default CA_SV_CS0_TRQ_P -0.5 # 负力矩系数（下偏抬头）
+
+# 1: 右鸭翼 -- 告诉飞控它是鸭翼
+param set-default CA_SV_CS1_TYPE  20   # Type::RightCanard
+param set-default CA_SV_CS1_TRQ_P -0.5
+
+# 2: 左副翼
+param set-default CA_SV_CS2_TYPE  1
+param set-default CA_SV_CS2_TRQ_R -0.5
+
+# 3: 右副翼
+param set-default CA_SV_CS3_TYPE  2
+param set-default CA_SV_CS3_TRQ_R 0.5
+
+# 4: 左常规升降舵（尾翼）或者方向舵（根据师哥模型的实际物理行为调整）
+# 师哥的CS4/CS5写的是Type 4(方向舵)，这里完全同步他的物理通道定义
+param set-default CA_SV_CS4_TYPE  4
+param set-default CA_SV_CS4_TRQ_Y 1
+
+# 5: 右常规方向舵
+param set-default CA_SV_CS5_TYPE  4
+param set-default CA_SV_CS5_TRQ_Y 1
+
+# ---------------------------------------------------------------------------
+# Gazebo 仿真输出桥梁（临门一脚：将算好的通道直接广播给仿真器）
+# ---------------------------------------------------------------------------
+param set-default SIM_GZ_EC_FUNC1 101 # 电机1油门
+
+param set-default SIM_GZ_SV_FUNC1 201 # 伺服1 -> 对应 CS0 (你的左鸭翼)
+param set-default SIM_GZ_SV_FUNC2 202 # 伺服2 -> 对应 CS1 (你的右鸭翼)
+param set-default SIM_GZ_SV_FUNC3 203 # 伺服3 -> 对应 CS2 (左副翼)
+param set-default SIM_GZ_SV_FUNC4 204 # 伺服4 -> 对应 CS3 (右副翼)
+param set-default SIM_GZ_SV_FUNC5 205 # 伺服5 -> 对应 CS4 (方向舵)
+param set-default SIM_GZ_SV_FUNC6 206 # 伺服6 -> 对应 CS5 (方向舵)
+
+param set-default SIM_GZ_EC_MIN1 10
+param set-default SIM_GZ_EC_MAX1 4500
+param set-default FD_ESCS_EN 0
+
+# ---------------------------------------------------------------------------
+# 你的专属自适应鸭翼状态机调参门限
+# ---------------------------------------------------------------------------
+param set-default FW_CANARD_TO         0.5  # 起飞增益
+param set-default FW_CANARD_BRK  1.0  # 空气刹车增益
+param set-default FW_CANARD_LND_H      0.1  # 接地高度
+param set-default FW_CANARD_LND_NZ     1.5  # 接地过载

@@ -109,6 +109,7 @@ if(CONFIG_MODULES_FW_RATE_CONTROL)
 		# [2000, 2999] Standard planes
 		2100_standard_plane
 		2106_albatross
+		2026_honghu
 
 		# [3000, 3999] Flying wing
 		3000_generic_wing

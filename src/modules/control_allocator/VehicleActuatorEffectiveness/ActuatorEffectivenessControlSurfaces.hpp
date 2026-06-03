@@ -1,5 +1,5 @@
 /****************************************************************************
- *
+ *鸿鹄翼鸭翼舵面引入，2025.5.23n修改
  *   Copyright (c) 2021 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -38,8 +38,9 @@
 #include <px4_platform_common/module_params.h>
 #include <lib/slew_rate/SlewRate.hpp>
 
-static constexpr float kFlapSlewRate = 0.5f; // slew rate for normalized flaps setpoint [1/s]
-static constexpr float kSpoilersSlewRate = 0.5f; // slew rate for normalized spoilers setpoint [1/s]
+static constexpr float kFlapSlewRate = 0.5f; // 归一化襟翼设定值的斜率限制 [1/秒]
+static constexpr float kSpoilersSlewRate = 0.5f; // 归一化扰流板设定值的斜率限制 [1/秒]
+static constexpr float kCanardSlewRate = 10.0f; // 鸭翼阶跃响应 [1/秒]，起飞时 ~0.05s 内到位
 
 class ActuatorEffectivenessControlSurfaces : public ModuleParams, public ActuatorEffectiveness
 {
@@ -48,8 +49,8 @@ public:
 	static constexpr int MAX_COUNT = 8;
 
 	enum class Type : int32_t {
-		// This matches with the parameter
-		LeftAileron = 1,
+		// 此处数字必须与地面站及系统参数的枚举值严格对应
+		 LeftAileron= 1,
 		RightAileron = 2,
 		Elevator = 3,
 		Rudder = 4,
@@ -67,6 +68,8 @@ public:
 		SteeringWheel = 16,
 		LeftSpoiler = 17,
 		RightSpoiler = 18,
+		LeftCanard = 19,  // 新增：左鸭翼类型枚举
+		RightCanard = 20, // 新增：右鸭翼类型枚举
 	};
 
 	struct Params {
@@ -76,6 +79,7 @@ public:
 		float trim;
 		float scale_flap;
 		float scale_spoiler;
+		float scale_canard; // 新增：储存从系统参数读出的鸭翼控制缩放系数,
 	};
 
 	ActuatorEffectivenessControlSurfaces(ModuleParams *parent);
@@ -92,6 +96,10 @@ public:
 	void applyFlaps(float flaps_control, int first_actuator_idx, float dt, ActuatorVector &actuator_sp);
 	void applySpoilers(float spoilers_control, int first_actuator_idx, float dt, ActuatorVector &actuator_sp);
 
+	// 新增：应用鸭翼控制量的函数声明
+	// 将通过订阅到的 canard_setpoint 结合斜率限制和通道缩放系数，直接追加到输出向量中
+	void applyCanard(float canard_control, int first_actuator_idx, float dt, ActuatorVector &actuator_sp);
+
 private:
 	void updateParams() override;
 
@@ -102,6 +110,7 @@ private:
 		param_t trim;
 		param_t scale_flap;
 		param_t scale_spoiler;
+		param_t scale_canard; // 新增：绑定系统自动生成的 CA_SV_CS%u_CANARD 参数句柄
 	};
 	ParamHandles _param_handles[MAX_COUNT];
 	param_t _count_handle;
@@ -111,4 +120,5 @@ private:
 
 	SlewRate<float> _flaps_setpoint_with_slewrate;
 	SlewRate<float> _spoilers_setpoint_with_slewrate;
+	SlewRate<float> _canard_setpoint_with_slewrate; // 新增：限制鸭翼运动速率的斜率限制器实例
 };

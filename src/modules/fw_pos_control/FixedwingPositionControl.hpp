@@ -84,6 +84,7 @@
 #include <uORB/topics/position_setpoint_triplet.h>
 #include <uORB/topics/tecs_status.h>
 #include <uORB/topics/trajectory_setpoint.h>
+#include <uORB/topics/vehicle_acceleration.h>
 #include <uORB/topics/vehicle_air_data.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
@@ -216,6 +217,7 @@ private:
 	uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	uORB::Subscription _vehicle_acceleration_sub{ORB_ID(vehicle_acceleration)};
 
 	uORB::Publication<vehicle_attitude_setpoint_s> _attitude_sp_pub;
 	uORB::Publication<vehicle_local_position_setpoint_s> _local_pos_sp_pub{ORB_ID(vehicle_local_position_setpoint)};
@@ -228,6 +230,9 @@ private:
 	uORB::Publication<landing_gear_s> _landing_gear_pub {ORB_ID(landing_gear)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _flaps_setpoint_pub{ORB_ID(flaps_setpoint)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _spoilers_setpoint_pub{ORB_ID(spoilers_setpoint)};
+	// # （新增：鸭翼设定点uORB发布者，）
+	// # 2026.5.24修改
+	uORB::Publication<normalized_unsigned_setpoint_s> _canard_setpoint_pub{ORB_ID(canard_setpoint)};
 	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 
 	manual_control_setpoint_s _manual_control_setpoint{};
@@ -433,9 +438,17 @@ private:
 	// LANDING GEAR
 	int8_t _new_landing_gear_position{landing_gear_s::GEAR_KEEP};
 
-	// FLAPS/SPOILERS
+	// # （新增：鸭翼状态变量 - 设定点/部署标志/收回锁存标志）
+	// # 2026.5.24修改
+	// FLAPS/SPOILERS/CANARDS
 	float _flaps_setpoint{0.f};
 	float _spoilers_setpoint{0.f};
+	float _canard_setpoint{0.f};
+	bool _canard_deployed{false};
+	bool _canard_retracted{false};
+	bool _canard_braked{false};
+	hrt_abstime _canard_touchdown_time{0};
+	uint8_t _canard_touchdown_phase{0};
 
 	hrt_abstime _time_in_fixed_bank_loiter{0}; // [us]
 	float _min_current_sp_distance_xy{FLT_MAX};
@@ -1016,6 +1029,12 @@ private:
 		(ParamFloat<px4::params::FW_FLAPS_LND_SCL>) _param_fw_flaps_lnd_scl,
 		(ParamFloat<px4::params::FW_FLAPS_TO_SCL>) _param_fw_flaps_to_scl,
 		(ParamFloat<px4::params::FW_SPOILERS_LND>) _param_fw_spoilers_lnd,
+		// # （新增：鸭翼参数 - 起飞偏转角/着陆收回高度/着陆收回法向过载）
+		// # 2026.5.24修改
+		(ParamFloat<px4::params::FW_CANARD_TO>) _param_fw_canard_to,
+		(ParamFloat<px4::params::FW_CANARD_BRK>) _param_fw_canard_brk,
+		(ParamFloat<px4::params::FW_CANARD_LND_H>) _param_fw_canard_lnd_h,
+		(ParamFloat<px4::params::FW_CANARD_LND_NZ>) _param_fw_canard_lnd_nz,
 
 		(ParamInt<px4::params::FW_POS_STK_CONF>) _param_fw_pos_stk_conf,
 

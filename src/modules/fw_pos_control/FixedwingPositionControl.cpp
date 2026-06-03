@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2023 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2023 Px4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,6 +71,7 @@ FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 
 	_flaps_setpoint_pub.advertise();
 	_spoilers_setpoint_pub.advertise();
+	_canard_setpoint_pub.advertise();// # 新增：鸭翼设定发布者 2026.5.24修改
 
 	_airspeed_slew_rate_controller.setSlewRate(ASPD_SP_SLEW_RATE);
 
@@ -161,10 +162,15 @@ FixedwingPositionControl::vehicle_control_mode_poll()
 
 		if (_control_mode_sub.copy(&_control_mode)) {
 
-			// reset state when arming
-			if (!was_armed && _control_mode.flag_armed) {
-				reset_takeoff_state();
-				reset_landing_state();
+			// 每次上电解锁后刷新状态 2026.5.27
+			if (!was_armed && _control_mode.flag_armed && _landed) {
+				reset_takeoff_state();// 重置 PX4 原生的固定翼起飞状态机
+				reset_landing_state();// 重置 PX4 原生的固定翼着陆状态机
+
+				_canard_deployed = false;//鸭翼重置未展开态
+				_canard_retracted = false;//鸭翼重置为未收回态
+				_canard_braked = false;//鸭翼空气刹车状态清零
+				_canard_touchdown_phase = 0;//鸭翼接地阶段清零
 			}
 		}
 	}
@@ -1620,7 +1626,7 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 		_flaps_setpoint = _param_fw_flaps_to_scl.get();
 
-		// retract ladning gear once passed the climbout state
+		// retract landing gear once passed the climbout state
 		if (_runway_takeoff.getState() > RunwayTakeoffState::CLIMBOUT) {
 			_new_landing_gear_position = landing_gear_s::GEAR_UP;
 		}
@@ -1973,6 +1979,56 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
 
+	// 鸭翼着陆时序 0-3
+	//（升降舵最大低头 + 鸭翼保持）2026.5.30修改
+	if (!_canard_retracted && _canard_deployed && _canard_touchdown_phase == 0) {
+		vehicle_acceleration_s accel;
+
+		if (_vehicle_acceleration_sub.copy(&accel)
+		    && PX4_ISFINITE(accel.xyz[2])) {
+			float normal_load = accel.xyz[2] / CONSTANTS_ONE_G;
+
+			bool agl_valid = false;
+			float agl_height = 0.f;
+
+			if (_local_pos.dist_bottom_valid && PX4_ISFINITE(_local_pos.dist_bottom)) {
+				agl_height = _local_pos.dist_bottom;
+				agl_valid = true;
+
+			} else if (PX4_ISFINITE(_current_altitude) && PX4_ISFINITE(_takeoff_ground_alt)) {
+				agl_height = _current_altitude - _takeoff_ground_alt;
+				agl_valid = (agl_height >= 0.f);
+			}
+
+			if (PX4_ISFINITE(normal_load)
+			    && agl_valid
+			    && agl_height < _param_fw_canard_lnd_h.get()
+			    && normal_load > _param_fw_canard_lnd_nz.get()) {
+				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
+				_canard_touchdown_time = now;
+				_canard_touchdown_phase = 1;
+			}
+		}
+	}
+
+	// 阶段1/2：升降舵强制最大低头偏角（气动刹车）
+	if (_canard_touchdown_phase == 1 || _canard_touchdown_phase == 2) {
+		const Eulerf euler_current(Quatf(_att_sp.q_d));
+		const Quatf att_override(Eulerf(euler_current.phi(), radians(_param_fw_p_lim_min.get()), _yaw));
+		att_override.copyTo(_att_sp.q_d);
+	}
+	// 阶段3：地速为零后鸭翼归零锁存
+	if (_canard_touchdown_phase == 2) {
+        // 使用 PX4_ISFINITE 安全过滤，防止GPS丢星导致NaN卡死状态机
+        if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < 0.5f) {
+                _canard_setpoint = 0.5f;
+                _canard_deployed = false;
+                _canard_braked = false;
+                _canard_retracted = true;
+                _canard_touchdown_phase = 3;
+        }
+	}
+
 	// deploy gear as soon as we're in land mode, if not already done before
 	_new_landing_gear_position = landing_gear_s::GEAR_DOWN;
 
@@ -2193,6 +2249,55 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
+
+	// 鸭翼着陆时序：阶段0→阶段1（升降舵最大低头 + 鸭翼保持）
+	if (!_canard_retracted && _canard_deployed && _canard_touchdown_phase == 0) {
+		vehicle_acceleration_s accel;
+
+		if (_vehicle_acceleration_sub.copy(&accel)
+		    && PX4_ISFINITE(accel.xyz[2])) {
+			float normal_load = accel.xyz[2] / CONSTANTS_ONE_G;
+
+			bool agl_valid = false;
+			float agl_height = 0.f;
+
+			if (_local_pos.dist_bottom_valid && PX4_ISFINITE(_local_pos.dist_bottom)) {
+				agl_height = _local_pos.dist_bottom;
+				agl_valid = true;
+
+			} else if (PX4_ISFINITE(_current_altitude) && PX4_ISFINITE(_takeoff_ground_alt)) {
+				agl_height = _current_altitude - _takeoff_ground_alt;
+				agl_valid = (agl_height >= 0.f);
+			}
+
+			if (PX4_ISFINITE(normal_load)
+			    && agl_valid
+			    && agl_height < _param_fw_canard_lnd_h.get()
+			    && normal_load > _param_fw_canard_lnd_nz.get()) {
+				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
+				_canard_touchdown_time = now;
+				_canard_touchdown_phase = 1;
+			}
+		}
+	}
+
+	// 阶段1/2：升降舵强制最大低头偏角（气动刹车）
+	if (_canard_touchdown_phase == 1 || _canard_touchdown_phase == 2) {
+		const Eulerf euler_current(Quatf(_att_sp.q_d));
+		const Quatf att_override(Eulerf(euler_current.phi(), radians(_param_fw_p_lim_min.get()), _yaw));
+		att_override.copyTo(_att_sp.q_d);
+	}
+
+	// 阶段2→3：地速为零后鸭翼归零锁存
+	if (_canard_touchdown_phase == 2) {
+		if (ground_speed.norm() < 0.5f) {
+			_canard_setpoint = 0.5f;
+			_canard_deployed = false;
+			_canard_braked = false;
+			_canard_retracted = true;
+			_canard_touchdown_phase = 3;
+		}
+	}
 
 	if (!_vehicle_status.in_transition_to_fw) {
 		publishLocalPositionSetpoint(pos_sp_curr);
@@ -2651,9 +2756,40 @@ FixedwingPositionControl::Run()
 
 		_att_sp.reset_integral = false;
 
-		// by default no flaps/spoilers, is overwritten below in certain modes
+		// 鸭翼部署判断：跑道起飞达到爬升阶段后偏转2026.5.27修改
+		if (!_canard_deployed && !_canard_retracted && _control_mode.flag_armed) {
+
+			if (_runway_takeoff.isInitialized()
+			    && _runway_takeoff.getState() >= runwaytakeoff::RunwayTakeoffState::CLIMBOUT) {
+				_canard_deployed = true;
+			}
+		}
+
+		// 鸭翼状态机 - 检查收回锁存/部署/默认
+		// by default no flaps/spoilers/canards, is overwritten below in certain modes
 		_flaps_setpoint = 0.f;
 		_spoilers_setpoint = 0.f;
+
+		// 鸭翼着陆阶段2：升降舵极限偏转1秒后，鸭翼极限上偏（空气刹车）
+		if (_canard_touchdown_phase == 1) {
+			if (_local_pos.timestamp - _canard_touchdown_time > 1_s) {
+				_canard_braked = true;
+				_canard_touchdown_phase = 2;
+			}
+		}
+
+		if (_canard_retracted) {//鸭翼永久收回锁存态 → 中立
+			_canard_setpoint = 0.5f;
+
+		} else if (_canard_braked) {//鸭翼空气刹车态 → 后缘极限上偏
+			_canard_setpoint = 0.5f - _param_fw_canard_brk.get() * 0.5f;
+
+		} else if (_canard_deployed) {//鸭翼巡航/起飞展开态 → 后缘下偏
+			_canard_setpoint = 0.5f + _param_fw_canard_to.get() * 0.5f;
+
+		} else {//其他状态 → 中立
+			_canard_setpoint = 0.5f;
+		}
 
 		// reset flight phase estimate
 		_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_UNKNOWN;
@@ -2809,6 +2945,13 @@ FixedwingPositionControl::Run()
 			spoilers_setpoint.normalized_setpoint = _spoilers_setpoint;
 			spoilers_setpoint.timestamp = hrt_absolute_time();
 			_spoilers_setpoint_pub.publish(spoilers_setpoint);
+
+			// # （新增：发布鸭翼设定点uORB消息）
+			// # 2026.5.24修改
+			normalized_unsigned_setpoint_s canard_setpoint;
+			canard_setpoint.normalized_setpoint = _canard_setpoint;
+			canard_setpoint.timestamp = hrt_absolute_time();
+			_canard_setpoint_pub.publish(canard_setpoint);
 		}
 
 		_z_reset_counter = _local_pos.z_reset_counter;
