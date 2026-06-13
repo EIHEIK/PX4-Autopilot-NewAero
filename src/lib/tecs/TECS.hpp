@@ -325,6 +325,7 @@ public:
 	 * @return The commanded pitch angle above trim in [rad].
 	 */
 	float getPitchSetpoint() const {return _pitch_setpoint;};
+	float getPitchIntegrator() const {return _pitch_integ_state;};	// 公开俯仰积分器状态
 	/**
 	 * @brief Get the Debug Output
 	 *
@@ -650,6 +651,7 @@ public:
 
 	float get_pitch_setpoint() {return _control.getPitchSetpoint();}
 	float get_throttle_setpoint() {return _control.getThrottleSetpoint();}
+	float get_pitch_integrator() {return _control.getPitchIntegrator();}	// 鸭翼自动配平用
 
 	/**
 	 * Returns the altitude tracking time constant

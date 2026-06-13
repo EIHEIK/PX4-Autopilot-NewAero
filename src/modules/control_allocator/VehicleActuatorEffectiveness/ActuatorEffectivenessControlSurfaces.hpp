@@ -50,7 +50,7 @@ public:
 
 	enum class Type : int32_t {
 		// 此处数字必须与地面站及系统参数的枚举值严格对应
-		 LeftAileron= 1,
+		LeftAileron= 1,
 		RightAileron = 2,
 		Elevator = 3,
 		Rudder = 4,

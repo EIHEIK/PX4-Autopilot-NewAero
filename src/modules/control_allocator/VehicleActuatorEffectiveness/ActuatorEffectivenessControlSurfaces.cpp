@@ -61,7 +61,7 @@ ActuatorEffectivenessControlSurfaces::ActuatorEffectivenessControlSurfaces(Modul
 		snprintf(name, sizeof(name), "CA_SV_CS%u_SPOIL", i);
 		_param_handles[i].scale_spoiler = param_find(name);
 
-		// ---- 新增：在构造函数中动态查找并绑定你在 module.yaml 里注册的鸭翼参数句柄 ----
+		// ---- 新增：在构造函数中动态查找并绑定在 module.yaml 里注册的鸭翼参数句柄 ----
 		snprintf(name, sizeof(name), "CA_SV_CS%u_CANARD", i);
 		_param_handles[i].scale_canard = param_find(name);
 	}
@@ -163,7 +163,7 @@ void ActuatorEffectivenessControlSurfaces::updateParams()
 			_params[i].torque.zero();
 			break;
 
-		// ---- 新增：在这里优雅地捕获左/右鸭翼，将其三轴力矩贡献强制归零 ----
+		// ---- 新增：在这里将鸭翼三轴力矩贡献强制归零 ----
 		// 这样可以确保控制分配矩阵求解时，鸭翼绝不插手常规主升降舵的闭环解算
 		case Type::LeftCanard:
 		case Type::RightCanard:

@@ -443,12 +443,14 @@ private:
 	// FLAPS/SPOILERS/CANARDS
 	float _flaps_setpoint{0.f};
 	float _spoilers_setpoint{0.f};
-	float _canard_setpoint{0.f};
+	float _canard_setpoint{0.5f};	// 初始为鸭翼中立（0.5=舵机0=顺流位），防止首次发布前发送极限偏转
 	bool _canard_deployed{false};
 	bool _canard_retracted{false};
 	bool _canard_braked{false};
 	hrt_abstime _canard_touchdown_time{0};
 	uint8_t _canard_touchdown_phase{0};
+	float _canard_trim_offset{0.f};		// 鸭翼自动配平补偿量 [0,1]，缓慢响应TECS俯仰积分器
+	float _pitch_integ_filtered{0.f};	// TECS俯仰积分器低通滤波值 [deg]
 
 	hrt_abstime _time_in_fixed_bank_loiter{0}; // [us]
 	float _min_current_sp_distance_xy{FLT_MAX};
@@ -1031,10 +1033,19 @@ private:
 		(ParamFloat<px4::params::FW_SPOILERS_LND>) _param_fw_spoilers_lnd,
 		// # （新增：鸭翼参数 - 起飞偏转角/着陆收回高度/着陆收回法向过载）
 		// # 2026.5.24修改
+		(ParamFloat<px4::params::FW_CANARD_NEUT>) _param_fw_canard_neut,
 		(ParamFloat<px4::params::FW_CANARD_TO>) _param_fw_canard_to,
 		(ParamFloat<px4::params::FW_CANARD_BRK>) _param_fw_canard_brk,
+		(ParamFloat<px4::params::FW_CANARD_BRKD>) _param_fw_canard_brkd,
 		(ParamFloat<px4::params::FW_CANARD_LND_H>) _param_fw_canard_lnd_h,
 		(ParamFloat<px4::params::FW_CANARD_LND_NZ>) _param_fw_canard_lnd_nz,
+		(ParamFloat<px4::params::FW_CANARD_LND_H2>) _param_fw_canard_lnd_h2,
+		(ParamFloat<px4::params::FW_CANARD_RSPD>) _param_fw_canard_rspd,
+		(ParamInt<px4::params::FW_CANARD_MAN>) _param_fw_canard_man,
+		(ParamInt<px4::params::FW_CANARD_RC_AUX>) _param_fw_canard_rc_aux,
+		(ParamInt<px4::params::FW_CANARD_ATRIM>) _param_fw_canard_atrim,
+		(ParamFloat<px4::params::FW_CANARD_TRM_TH>) _param_fw_canard_trm_th,
+		(ParamFloat<px4::params::FW_CANARD_TRM_MX>) _param_fw_canard_trm_mx,
 
 		(ParamInt<px4::params::FW_POS_STK_CONF>) _param_fw_pos_stk_conf,
 

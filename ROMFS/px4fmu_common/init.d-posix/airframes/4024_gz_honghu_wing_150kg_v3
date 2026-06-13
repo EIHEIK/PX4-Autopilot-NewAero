@@ -52,6 +52,7 @@ param set-default FW_LND_ANG 5
 param set-default FW_LND_USETER 0
 param set-default FW_LND_ABORT 0
 param set-default RWTO_TKOFF 1
+param set-default RWTO_ROT_AIRSPD 18.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
 param set-default FW_W_EN 1
 
 # ---------------------------------------------------------------------------

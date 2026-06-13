@@ -171,6 +171,8 @@ FixedwingPositionControl::vehicle_control_mode_poll()
 				_canard_retracted = false;//鸭翼重置为未收回态
 				_canard_braked = false;//鸭翼空气刹车状态清零
 				_canard_touchdown_phase = 0;//鸭翼接地阶段清零
+				_canard_trim_offset = 0.f;//鸭翼配平补偿清零
+				_pitch_integ_filtered = 0.f;//配平积分器滤波清零
 			}
 		}
 	}
@@ -1750,6 +1752,7 @@ void
 FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, const float control_interval,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr)
 {
+	//自动着陆控制函数
 	// first handle non-position things like airspeed and tecs settings
 	const float airspeed_land = (_param_fw_lnd_airspd.get() > FLT_EPSILON) ? _param_fw_lnd_airspd.get() :
 				    _performance_model.getMinimumCalibratedAirspeed(getLoadFactor());
@@ -2000,9 +2003,14 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 				agl_valid = (agl_height >= 0.f);
 			}
 
+			// 根据高度源选择阈值：激光雷达用精确值，气压/GPS用宽范围安全门
+			const float lnd_h_threshold = _local_pos.dist_bottom_valid
+				? _param_fw_canard_lnd_h.get()      // 激光雷达精确阈值 0.1m
+				: _param_fw_canard_lnd_h2.get();     // 气压/GPS宽范围安全门 5.0m
+
 			if (PX4_ISFINITE(normal_load)
 			    && agl_valid
-			    && agl_height < _param_fw_canard_lnd_h.get()
+			    && agl_height < lnd_h_threshold
 			    && normal_load > _param_fw_canard_lnd_nz.get()) {
 				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
 				_canard_touchdown_time = now;
@@ -2020,8 +2028,8 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 	// 阶段3：地速为零后鸭翼归零锁存
 	if (_canard_touchdown_phase == 2) {
         // 使用 PX4_ISFINITE 安全过滤，防止GPS丢星导致NaN卡死状态机
-        if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < 0.5f) {
-                _canard_setpoint = 0.5f;
+        if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < _param_fw_canard_rspd.get()) {
+                _canard_setpoint = _param_fw_canard_neut.get();
                 _canard_deployed = false;
                 _canard_braked = false;
                 _canard_retracted = true;
@@ -2270,9 +2278,14 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 				agl_valid = (agl_height >= 0.f);
 			}
 
+			// 根据高度源选择阈值：激光雷达用精确值，气压/GPS用宽范围安全门
+			const float lnd_h_threshold = _local_pos.dist_bottom_valid
+				? _param_fw_canard_lnd_h.get()      // 激光雷达精确阈值 0.1m
+				: _param_fw_canard_lnd_h2.get();     // 气压/GPS宽范围安全门 5.0m
+
 			if (PX4_ISFINITE(normal_load)
 			    && agl_valid
-			    && agl_height < _param_fw_canard_lnd_h.get()
+			    && agl_height < lnd_h_threshold
 			    && normal_load > _param_fw_canard_lnd_nz.get()) {
 				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
 				_canard_touchdown_time = now;
@@ -2291,8 +2304,8 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	// 阶段2→3：地速为零后鸭翼归零锁存
 	if (_canard_touchdown_phase == 2) {
 		// 使用 PX4_ISFINITE 安全过滤，防止GPS丢星导致NaN卡死状态机
-		if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < 0.5f) {
-			_canard_setpoint = 0.5f;
+		if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < _param_fw_canard_rspd.get()) {
+			_canard_setpoint = _param_fw_canard_neut.get();
 			_canard_deployed = false;
 			_canard_braked = false;
 			_canard_retracted = true;
@@ -2773,23 +2786,97 @@ FixedwingPositionControl::Run()
 
 		// 鸭翼着陆阶段2：升降舵极限偏转1秒后，鸭翼极限上偏（空气刹车）
 		if (_canard_touchdown_phase == 1) {
-			if (_local_pos.timestamp - _canard_touchdown_time > 1_s) {
+			if (_local_pos.timestamp - _canard_touchdown_time > (_param_fw_canard_brkd.get() * 1_s)) {
 				_canard_braked = true;
 				_canard_touchdown_phase = 2;
 			}
 		}
 
 		if (_canard_retracted) {//鸭翼永久收回锁存态 → 中立
-			_canard_setpoint = 0.5f;
+			_canard_setpoint = _param_fw_canard_neut.get();
 
 		} else if (_canard_braked) {//鸭翼空气刹车态 → 后缘极限上偏
-			_canard_setpoint = 0.5f - _param_fw_canard_brk.get() * 0.5f;
+			_canard_setpoint = _param_fw_canard_neut.get() - _param_fw_canard_brk.get() * 0.5f;
 
 		} else if (_canard_deployed) {//鸭翼巡航/起飞展开态 → 后缘下偏
-			_canard_setpoint = 0.5f + _param_fw_canard_to.get() * 0.5f;
+			_canard_setpoint = _param_fw_canard_neut.get() + _param_fw_canard_to.get() * 0.5f;
 
 		} else {//其他状态 → 中立
-			_canard_setpoint = 0.5f;
+			_canard_setpoint = _param_fw_canard_neut.get();
+		}
+
+		// 手动/自稳/定高/定点模式鸭翼三档开关RC控制
+		// threshold ±0.5为三档拨杆去抖，复用FW_CANARD_TO/BRK/NEUT参数定幅
+		// # 2026.6.7新增
+		if (_param_fw_canard_man.get() == 1
+		    && _control_mode.flag_control_manual_enabled
+		    && !_control_mode.flag_control_auto_enabled) {
+
+			const int aux_idx = _param_fw_canard_rc_aux.get() - 1; // 1-index → 0-index
+			float aux_value = 0.f;
+
+			if (aux_idx == 0) { aux_value = _manual_control_setpoint.aux1; }
+			else if (aux_idx == 1) { aux_value = _manual_control_setpoint.aux2; }
+			else if (aux_idx == 2) { aux_value = _manual_control_setpoint.aux3; }
+			else if (aux_idx == 3) { aux_value = _manual_control_setpoint.aux4; }
+			else if (aux_idx == 4) { aux_value = _manual_control_setpoint.aux5; }
+			else if (aux_idx == 5) { aux_value = _manual_control_setpoint.aux6; }
+
+			// 三档阈值判断 → 复用自主模式参数定幅
+			if (aux_value > 0.5f) {
+				// 拨杆向上 → 鸭翼后缘下偏（巡航/起飞态）
+				_canard_setpoint = _param_fw_canard_neut.get() + _param_fw_canard_to.get() * 0.5f;
+			} else if (aux_value < -0.5f) {
+				// 拨杆向下 → 鸭翼后缘上偏（空气刹车态）
+				_canard_setpoint = _param_fw_canard_neut.get() - _param_fw_canard_brk.get() * 0.5f;
+			} else {
+				// 拨杆中位 → 鸭翼中立
+				_canard_setpoint = _param_fw_canard_neut.get();
+			}
+		}
+
+		// 鸭翼自动配平：巡航阶段检测TECS俯仰积分器长期偏载，补偿重心前移
+		// 仅在自主模式下巡航阶段生效，不对称死区防止闭环振荡
+		// # 2026.6.10新增
+		const bool in_landing_mode = (_control_mode_current == FW_POSCTRL_MODE_AUTO_LANDING_STRAIGHT)
+					     || (_control_mode_current == FW_POSCTRL_MODE_AUTO_LANDING_CIRCULAR);
+
+		if (_param_fw_canard_atrim.get() == 1
+		    && _canard_deployed
+		    && !_canard_braked
+		    && !_canard_retracted
+		    && _runway_takeoff.getState() >= runwaytakeoff::RunwayTakeoffState::FLY
+		    && _control_mode.flag_control_auto_enabled
+		    && !in_landing_mode
+		    && fabsf(_local_pos.vz) < 0.5f) {
+
+			const float pitch_integ_deg = math::degrees(_tecs.get_pitch_integrator());
+
+			// 1/60s的低通滤波，只跟踪稳态偏置，滤除突风/机动扰动
+			const float alpha = math::constrain(control_interval / 60.f, 0.f, 1.f);
+			_pitch_integ_filtered = _pitch_integ_filtered * (1.f - alpha) + pitch_integ_deg * alpha;
+
+			// 不对称死区: >TRM_TH 增加配平, <-1° 减小配平
+			const float trim_rate = 0.01f; // 0.01/s 缓慢调节
+			if (_pitch_integ_filtered > _param_fw_canard_trm_th.get()) {
+				_canard_trim_offset += trim_rate * control_interval;
+			} else if (_pitch_integ_filtered < -1.0f) {
+				_canard_trim_offset -= trim_rate * control_interval;
+			}
+
+			_canard_trim_offset = math::constrain(_canard_trim_offset, 0.f, _param_fw_canard_trm_mx.get());
+
+		} else {
+			// 非巡航条件: 保持当前补偿量，清零滤波器防止积分饱和
+			_pitch_integ_filtered = 0.f;
+		}
+
+		// 将配平补偿叠加到鸭翼展开态（刹车/收回/手动RC时不叠加）
+		if (_canard_deployed && !_canard_braked && !_canard_retracted
+		    && !(_param_fw_canard_man.get() == 1
+		         && _control_mode.flag_control_manual_enabled
+		         && !_control_mode.flag_control_auto_enabled)) {
+			_canard_setpoint = math::constrain(_canard_setpoint + _canard_trim_offset, 0.f, 1.f);
 		}
 
 		// reset flight phase estimate
@@ -2947,8 +3034,11 @@ FixedwingPositionControl::Run()
 			spoilers_setpoint.timestamp = hrt_absolute_time();
 			_spoilers_setpoint_pub.publish(spoilers_setpoint);
 
-			// # （新增：发布鸭翼设定点uORB消息）
-			// # 2026.5.24修改
+		}
+
+		// 鸭翼发布：手动/自主模式均生效，确保手动飞行时鸭翼也能正常控制
+		// # 2026.5.24修改，2026.6.7移出auto_enabled门控以覆盖手动模式
+		if (_vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING) {
 			normalized_unsigned_setpoint_s canard_setpoint;
 			canard_setpoint.normalized_setpoint = _canard_setpoint;
 			canard_setpoint.timestamp = hrt_absolute_time();

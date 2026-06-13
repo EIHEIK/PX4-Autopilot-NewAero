@@ -966,6 +966,21 @@ PARAM_DEFINE_FLOAT(FW_SPOILERS_LND, 0.f);
  * @increment 0.01
  * @group FW Attitude Control
  */
+/**
+ * Canard neutral setpoint
+ *
+ * 归一化中立点。0.5 = 舵机0 = 鸭翼顺流位。
+ * >0.5为后缘下偏(抬头)，<0.5为后缘上偏(低头)。
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_NEUT, 0.5f);
+
 PARAM_DEFINE_FLOAT(FW_CANARD_TO, 0.5f);
 
 /**
@@ -982,6 +997,20 @@ PARAM_DEFINE_FLOAT(FW_CANARD_TO, 0.5f);
  * @group FW Attitude Control
  */
 PARAM_DEFINE_FLOAT(FW_CANARD_BRK, 1.0f);
+
+/**
+ * Canard airbrake delay after touchdown
+ *
+ * 着陆接地瞬间（phase 0→1）到触发气动刹车（phase 1→2）的等待时间。
+ *
+ * @unit s
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_BRKD, 1.0f);
 
 /**
  * Canard landing retraction height threshold
@@ -1014,3 +1043,98 @@ PARAM_DEFINE_FLOAT(FW_CANARD_LND_H, 0.1f);
  * @group FW Attitude Control
  */
 PARAM_DEFINE_FLOAT(FW_CANARD_LND_NZ, 1.5f);
+
+/**
+ * Canard landing height threshold (baro/GPS fallback)
+ *
+ * 当激光雷达不可用时，使用气压高度/GPS推算的AGL作为宽范围安全门。
+ * 此时过载为接地主要判据，高度仅用于排除高空颠簸误触发。
+ *
+ * @unit m
+ * @min 0.5
+ * @max 30.0
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_LND_H2, 5.0f);
+
+/**
+ * Canard retraction ground speed threshold
+ *
+ * 地速低于此值时鸭翼从刹车态收回中立并锁存（phase 2→3）。
+ *
+ * @unit m/s
+ * @min 0.0
+ * @max 10.0
+ * @decimal 1
+ * @increment 0.1
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_RSPD, 0.5f);
+
+/**
+ * Canard manual RC control enable
+ *
+ * 手动/自稳/定高/定点模式下允许通过遥控器三档开关控制鸭翼。
+ * 0=禁用, 1=启用。自主模式不受影响。
+ *
+ * @min 0
+ * @max 1
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_INT32(FW_CANARD_MAN, 0);
+
+/**
+ * Canard manual RC AUX channel index
+ *
+ * 选择三档开关对应的遥控器AUX通道编号（1-6）。
+ * 向上=下偏, 中位=中立, 向下=上偏。
+ *
+ * @min 1
+ * @max 6
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_INT32(FW_CANARD_RC_AUX, 5);
+
+/**
+ * Canard auto-trim enable
+ *
+ * 巡航阶段根据升降舵长期偏载自动调整鸭翼下偏量，
+ * 补偿燃油消耗导致的重心前移。0=禁用, 1=启用。
+ *
+ * @min 0
+ * @max 1
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_INT32(FW_CANARD_ATRIM, 0);
+
+/**
+ * Canard auto-trim pitch integrator threshold
+ *
+ * TECS俯仰积分器超过此阈值（度）时触发鸭翼配平补偿。
+ * 不对称死区: >此值增加配平, <-0.5°减小配平。
+ *
+ * @unit deg
+ * @min 0.5
+ * @max 10.0
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_TRM_TH, 2.0f);
+
+/**
+ * Canard auto-trim max additional deflection
+ *
+ * 配平补偿的最大额外鸭翼偏角 [0,1]。
+ * 0=不额外补偿, 1=最大额外下偏。
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 0.5
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_TRM_MX, 0.3f);

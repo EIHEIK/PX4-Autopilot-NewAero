@@ -85,7 +85,7 @@ void ActuatorEffectivenessFixedWing::allocateAuxilaryControls(const float dt, in
 		_control_surfaces.applySpoilers(spoilers_setpoint.normalized_setpoint, _first_control_surface_idx, dt, actuator_sp);
 	}
 
-	// apply canards
+	// apply canards2026.5.31
 	normalized_unsigned_setpoint_s canard_setpoint;
 
 	if (_canard_setpoint_sub.copy(&canard_setpoint)) {
