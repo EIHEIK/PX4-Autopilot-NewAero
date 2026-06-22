@@ -450,7 +450,6 @@ private:
 	hrt_abstime _canard_touchdown_time{0};
 	uint8_t _canard_touchdown_phase{0};
 	float _canard_trim_offset{0.f};		// 鸭翼自动配平补偿量 [0,1]，缓慢响应TECS俯仰积分器
-	float _pitch_integ_filtered{0.f};	// TECS俯仰积分器低通滤波值 [deg]
 
 	hrt_abstime _time_in_fixed_bank_loiter{0}; // [us]
 	float _min_current_sp_distance_xy{FLT_MAX};

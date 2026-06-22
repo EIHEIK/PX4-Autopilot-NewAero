@@ -269,7 +269,7 @@ void FixedwingAttitudeControl::Run()
 
 		vehicle_land_detected_poll();
 
-		bool wheel_control = false;
+		bool wheel_control = false;//默认轮控不开启2026.6.17
 
 		if (_param_fw_w_en.get() && _att_sp.fw_control_yaw_wheel && _vcontrol_mode.flag_control_auto_enabled) {
 			wheel_control = true;
@@ -335,7 +335,7 @@ void FixedwingAttitudeControl::Run()
 					_yaw_ctrl.control_yaw(roll_sp, _pitch_ctrl.get_euler_rate_setpoint(), euler_angles.phi(),
 							      euler_angles.theta(), get_airspeed_constrained());
 
-					if (wheel_control) {
+					if (wheel_control) {//轮控算法的核心调用2026.6.17
 						_wheel_ctrl.control_attitude(euler_sp.psi(), euler_angles.psi());
 
 					} else {
@@ -398,7 +398,7 @@ void FixedwingAttitudeControl::Run()
 				// position controller during auto modes _manual_control_setpoint.r gets passed
 				// whenever nudging is enabled, otherwise zero
 				const float wheel_controller_output = _wheel_ctrl.control_bodyrate(dt, angular_velocity.xyz[2], _groundspeed,
-								      groundspeed_scale);
+								      groundspeed_scale);//控制舵机输出
 				wheel_u = wheel_control ? wheel_controller_output +  _att_sp.yaw_sp_move_rate : 0.f;
 			}
 

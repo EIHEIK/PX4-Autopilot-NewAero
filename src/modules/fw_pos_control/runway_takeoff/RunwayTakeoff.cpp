@@ -62,17 +62,17 @@ void RunwayTakeoff::init(const hrt_abstime &time_now, const float initial_yaw, c
 }
 
 void RunwayTakeoff::update(const hrt_abstime &time_now, const float takeoff_airspeed, const float calibrated_airspeed,
-			   const float vehicle_altitude, const float clearance_altitude)
+			   const float vehicle_altitude, const float clearance_altitude)//起飞状态机切换函数
 {
 	switch (takeoff_state_) {
-	case RunwayTakeoffState::THROTTLE_RAMP:
+	case RunwayTakeoffState::THROTTLE_RAMP://当油门达到全油门稳定状态后
 		if ((time_now - time_initialized_) > (param_rwto_ramp_time_.get() * 1_s)) {
 			takeoff_state_ = RunwayTakeoffState::CLAMPED_TO_RUNWAY;
 		}
 
 		break;
 
-	case RunwayTakeoffState::CLAMPED_TO_RUNWAY: {
+	case RunwayTakeoffState::CLAMPED_TO_RUNWAY: {//地面滑跑阶段，轮控主要发挥作用
 			const float rotation_airspeed = (param_rwto_rot_airspd_.get() > FLT_EPSILON) ? math::min(param_rwto_rot_airspd_.get(),
 							takeoff_airspeed) : 0.9f * takeoff_airspeed;
 

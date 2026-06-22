@@ -172,7 +172,6 @@ FixedwingPositionControl::vehicle_control_mode_poll()
 				_canard_braked = false;//鸭翼空气刹车状态清零
 				_canard_touchdown_phase = 0;//鸭翼接地阶段清零
 				_canard_trim_offset = 0.f;//鸭翼配平补偿清零
-				_pitch_integ_filtered = 0.f;//配平积分器滤波清零
 			}
 		}
 	}
@@ -1543,11 +1542,11 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 				       clearance_altitude_amsl - _takeoff_ground_alt);
 
 		// yaw control is disabled once in "taking off" state
-		_att_sp.fw_control_yaw_wheel = _runway_takeoff.controlYaw();
+		_att_sp.fw_control_yaw_wheel = _runway_takeoff.controlYaw();//起飞过程使能前轮转向控制在起飞离地前2026.6.17
 
 		// XXX: hacky way to pass through manual nose-wheel incrementing. need to clean this interface.
-		if (_param_rwto_nudge.get()) {
-			_att_sp.yaw_sp_move_rate = _manual_control_setpoint.yaw;
+		if (_param_rwto_nudge.get()) {//是否开启人工手动微调
+			_att_sp.yaw_sp_move_rate = _manual_control_setpoint.yaw;//直接将遥控器偏航杆量作为偏航角速率设定值，写入姿态设定点。
 		}
 
 		// tune up the lateral position control guidance when on the ground
@@ -1556,19 +1555,19 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 		}
 
-		const Vector2f start_pos_local = _global_local_proj_ref.project(_runway_takeoff.getStartPosition()(0),
+		const Vector2f start_pos_local = _global_local_proj_ref.project(_runway_takeoff.getStartPosition()(0),//进入起飞模式瞬间飞机所在的经纬度位置
 						 _runway_takeoff.getStartPosition()(1));
-		const Vector2f takeoff_waypoint_local = _global_local_proj_ref.project(pos_sp_curr.lat, pos_sp_curr.lon);
+		const Vector2f takeoff_waypoint_local = _global_local_proj_ref.project(pos_sp_curr.lat, pos_sp_curr.lon);//起飞航点的目标经纬度
 
 		// by default set the takeoff bearing to the takeoff yaw, but override in a mission takeoff with bearing to takeoff WP
-		float takeoff_bearing = _launch_current_yaw;
+		float takeoff_bearing = _launch_current_yaw;//最终确定的目标航向，单位为弧度，以北为0，顺时针增加。
 
-		if (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION) {
+		if (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION) {//另一种航向控制（自主飞行中）
 			// the bearing from runway start to the takeoff waypoint is followed until the clearance altitude is exceeded
 			const Vector2f takeoff_bearing_vector = takeoff_waypoint_local - start_pos_local;
 
 			if (takeoff_bearing_vector.norm() > FLT_EPSILON) {
-				takeoff_bearing = atan2f(takeoff_bearing_vector(1), takeoff_bearing_vector(0));
+				takeoff_bearing = atan2f(takeoff_bearing_vector(1), takeoff_bearing_vector(0));//向量与标准参考方向间的夹角
 			}
 		}
 
@@ -1772,7 +1771,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 	const Vector2f local_position{_local_pos.x, _local_pos.y};
 	Vector2f local_land_point = _global_local_proj_ref.project(pos_sp_curr.lat, pos_sp_curr.lon);
 
-	initializeAutoLanding(now, pos_sp_prev, pos_sp_curr.alt, local_position, local_land_point);
+	initializeAutoLanding(now, pos_sp_prev, pos_sp_curr.alt, local_position, local_land_point);//进入着陆模式前
 
 	// touchdown may get nudged by manual inputs
 	local_land_point = calculateTouchdownPosition(control_interval, local_land_point);
@@ -1818,7 +1817,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 	const bool is_low_height = true;
 
 	// the terrain estimate (if enabled) is always used to determine the flaring altitude
-	if ((_current_altitude < terrain_alt + flare_rel_alt) || _flare_states.flaring) {
+	if ((_current_altitude < terrain_alt + flare_rel_alt) || _flare_states.flaring) {//当前高度 < 地形高度 + 拉平高度并且处于拉平子模式
 		// flare and land with minimal speed
 
 		// flaring is a "point of no return"
@@ -1911,11 +1910,11 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		attitude_setpoint.copyTo(_att_sp.q_d);
 
 		// enable direct yaw control using rudder/wheel
-		_att_sp.fw_control_yaw_wheel = true;
+		_att_sp.fw_control_yaw_wheel = true;//直线着陆使能转向轮2026.6.17
 
 		// XXX: hacky way to pass through manual nose-wheel incrementing. need to clean this interface.
-		if (_param_fw_lnd_nudge.get() > LandingNudgingOption::kNudgingDisabled) {
-			_att_sp.yaw_sp_move_rate = _manual_control_setpoint.yaw;
+		if (_param_fw_lnd_nudge.get() > LandingNudgingOption::kNudgingDisabled) {//直接将遥控器的偏航杆量赋值给姿态设定点的偏航角速率字段
+			_att_sp.yaw_sp_move_rate = _manual_control_setpoint.yaw;//覆盖自主控制器原本计算出的偏航角速率指令。
 		}
 
 		// blend the height rate controlled throttle setpoints with initial throttle setting over the flare
@@ -2096,7 +2095,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	float yaw_body;
 	float pitch_body;
 
-	if ((_current_altitude < terrain_alt + flare_rel_alt) || _flare_states.flaring) {
+	if ((_current_altitude < terrain_alt + flare_rel_alt) || _flare_states.flaring) {//当前高度 < 地形高度 + 拉平高度，并且处于拉平阶段
 		// flare and land with minimal speed
 
 		// flaring is a "point of no return"
@@ -2182,7 +2181,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		pitch_body = get_tecs_pitch();
 
 		// enable direct yaw control using rudder/wheel
-		_att_sp.fw_control_yaw_wheel = true;
+		_att_sp.fw_control_yaw_wheel = true;//盘旋着陆落地前使能转向轮2026.6.17
 
 		// XXX: hacky way to pass through manual nose-wheel incrementing. need to clean this interface.
 		if (_param_fw_lnd_nudge.get() > LandingNudgingOption::kNudgingDisabled) {
@@ -2573,7 +2572,7 @@ FixedwingPositionControl::get_tecs_thrust()
 void
 FixedwingPositionControl::Run()
 {
-	if (should_exit()) {
+	if (should_exit()) {//判断任务是否取消
 		_local_pos_sub.unregisterCallback();
 		exit_and_cleanup();
 		return;
@@ -2583,14 +2582,14 @@ FixedwingPositionControl::Run()
 
 	/* only run controller if position changed */
 
-	if (_local_pos_sub.update(&_local_pos)) {
+	if (_local_pos_sub.update(&_local_pos)) {//判断是否有新的位置消息
 
 		const float control_interval = math::constrain((_local_pos.timestamp - _last_time_position_control_called) * 1e-6f,
 					       MIN_AUTO_TIMESTEP, MAX_AUTO_TIMESTEP);
 		_last_time_position_control_called = _local_pos.timestamp;
 
 		// check for parameter updates
-		if (_parameter_update_sub.updated()) {
+		if (_parameter_update_sub.updated()) {//QGC修改参数实时更新
 			// clear update
 			parameter_update_s pupdate;
 			_parameter_update_sub.copy(&pupdate);
@@ -2601,7 +2600,7 @@ FixedwingPositionControl::Run()
 
 		vehicle_global_position_s gpos;
 
-		if (_global_pos_sub.update(&gpos)) {
+		if (_global_pos_sub.update(&gpos)) {//获取全局位置与参考高度
 			_current_latitude = gpos.lat;
 			_current_longitude = gpos.lon;
 		}
@@ -2723,7 +2722,7 @@ FixedwingPositionControl::Run()
 				_min_current_sp_distance_xy = FLT_MAX;
 			}
 		}
-
+		//传感器轮询，下面的函数分别从对应的 UORB 订阅中读取最新的消息
 		airspeed_poll();
 		manual_control_setpoint_poll();
 		vehicle_attitude_poll();
@@ -2732,7 +2731,7 @@ FixedwingPositionControl::Run()
 		wind_poll();
 
 		vehicle_air_data_s air_data;
-
+		//更新 _landed 标志
 		if (_vehicle_air_data_sub.update(&air_data)) {
 			_air_density = PX4_ISFINITE(air_data.rho) ? air_data.rho : _air_density;
 			_tecs.set_max_climb_rate(_performance_model.getMaximumClimbRate(_air_density));
@@ -2754,7 +2753,7 @@ FixedwingPositionControl::Run()
 				_backtrans_heading = NAN;
 			}
 		}
-
+		//获取当前位置/速度并设置控制模式
 		Vector2d curr_pos(_current_latitude, _current_longitude);
 		Vector2f ground_speed(_local_pos.vx, _local_pos.vy);
 
@@ -2852,26 +2851,22 @@ FixedwingPositionControl::Run()
 
 			const float pitch_integ_deg = math::degrees(_tecs.get_pitch_integrator());
 
-			// 1/60s的低通滤波，只跟踪稳态偏置，滤除突风/机动扰动
-			const float alpha = math::constrain(control_interval / 60.f, 0.f, 1.f);
-			_pitch_integ_filtered = _pitch_integ_filtered * (1.f - alpha) + pitch_integ_deg * alpha;
 
 			// 不对称死区: >TRM_TH 增加配平, <-1° 减小配平
 			const float trim_rate = 0.01f; // 0.01/s 缓慢调节
-			if (_pitch_integ_filtered > _param_fw_canard_trm_th.get()) {
+			if (pitch_integ_deg > _param_fw_canard_trm_th.get()) {
 				_canard_trim_offset += trim_rate * control_interval;
-			} else if (_pitch_integ_filtered < -1.0f) {
+			} else if (pitch_integ_deg < -1.0f) {
 				_canard_trim_offset -= trim_rate * control_interval;
 			}
 
 			_canard_trim_offset = math::constrain(_canard_trim_offset, 0.f, _param_fw_canard_trm_mx.get());
 
 		} else {
-			// 非巡航条件: 保持当前补偿量，清零滤波器防止积分饱和
-			_pitch_integ_filtered = 0.f;
+			// 非巡航条件: 保持补偿量不变，TECS积分器在不更新时自行保持
 		}
 
-		// 将配平补偿叠加到鸭翼展开态（刹车/收回/手动RC时不叠加）
+		// 将配平补偿叠加到鸭翼展开态（保证只在巡航时叠加）
 		if (_canard_deployed && !_canard_braked && !_canard_retracted
 		    && !(_param_fw_canard_man.get() == 1
 		         && _control_mode.flag_control_manual_enabled
@@ -3171,22 +3166,22 @@ FixedwingPositionControl::constrainRollNearGround(const float roll_setpoint, con
 }
 
 void
-FixedwingPositionControl::initializeAutoLanding(const hrt_abstime &now, const position_setpoint_s &pos_sp_prev,
+FixedwingPositionControl::initializeAutoLanding(const hrt_abstime &now, const position_setpoint_s &pos_sp_prev,//在飞机进入自动降落模式前，完成降落轨迹的参数计算和状态重置2026.6.17
 		const float land_point_altitude, const Vector2f &local_position, const Vector2f &local_land_point)
 {
-	if (_time_started_landing == 0) {
+	if (_time_started_landing == 0) {//“仅执行一次”保护锁
 
 		float height_above_land_point;
-		Vector2f local_approach_entrance;
+		Vector2f local_approach_entrance;//定义进场航向2026.6.17
 
 		// set the landing approach entrance location when we have just started the landing and store it
 		// NOTE: the landing approach vector is relative to the land point. ekf resets may cause a local frame
 		// jump, so we reference to the land point, which is globally referenced and will update
-		if (_position_setpoint_previous_valid) {
+		if (_position_setpoint_previous_valid) {//表示任务中着陆点之前有一个合法的航点也就是“进场点”
 			height_above_land_point = pos_sp_prev.alt - land_point_altitude;
 			local_approach_entrance = _global_local_proj_ref.project(pos_sp_prev.lat, pos_sp_prev.lon);
 
-		} else {
+		} else {//前一个航点无效。通常发生在用户直接在 QGC 上点击“降落”按钮，而没有开启完整任务；或者任务被中断。
 			// no valid previous waypoint, construct one from the glide slope and direction from current
 			// position to land point
 
@@ -3197,7 +3192,7 @@ FixedwingPositionControl::initializeAutoLanding(const hrt_abstime &now, const po
 			// landing pattern generation and corresponding logic
 
 			height_above_land_point = _current_altitude - land_point_altitude;
-			local_approach_entrance = local_position;
+			local_approach_entrance = local_position;//将飞机的当前位置作为进场入口点
 		}
 
 		_landing_approach_entrance_rel_alt = math::max(height_above_land_point, FLT_EPSILON);

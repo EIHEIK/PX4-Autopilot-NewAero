@@ -44,7 +44,7 @@
 
 using matrix::wrap_pi;
 
-float WheelController::control_bodyrate(float dt, float body_z_rate, float groundspeed, float groundspeed_scaler)
+float WheelController::control_bodyrate(float dt, float body_z_rate, float groundspeed, float groundspeed_scaler)//PI控制器加前馈的实际指令计算
 {
 	/* Do not calculate control signal with bad inputs */
 	if (!(PX4_ISFINITE(body_z_rate) &&
@@ -85,14 +85,14 @@ float WheelController::control_attitude(float yaw_setpoint, float yaw)
 	if (!(PX4_ISFINITE(yaw_setpoint) &&
 	      PX4_ISFINITE(yaw))) {
 
-		return _body_rate_setpoint;
+		return _body_rate_setpoint;//返回上一时刻偏航速率指令
 	}
 
-	const float yaw_error = wrap_pi(yaw_setpoint - yaw);
+	const float yaw_error = wrap_pi(yaw_setpoint - yaw);//计算偏航误差并归一化
 
-	_body_rate_setpoint = yaw_error / _tc; // assume 0 pitch and roll angle, thus jacobian is simply identity matrix
+	_body_rate_setpoint = yaw_error / _tc; // 比例控制生成偏航速率指令（P控制）
 
-	if (_max_rate > 0.01f) {
+	if (_max_rate > 0.01f) {//参数为 0 或接近零，就取消限制
 		if (_body_rate_setpoint > 0.f) {
 			_body_rate_setpoint = (_body_rate_setpoint > _max_rate) ? _max_rate : _body_rate_setpoint;
 
