@@ -119,12 +119,32 @@ if [ -n "${PX4_SIM_MODEL#*gz_}" ] && [ -z "${PX4_GZ_MODEL_NAME}" ]; then
 		echo "INFO  [init] Spawning model at position: ${pos_x} ${pos_y} ${pos_z}"
 	fi
 
+	MODEL_SDF_FILE="${PX4_GZ_MODELS}/${MODEL_NAME}/model.sdf"
+
+	# Allow repository-local simulation models without modifying the gz submodule.
+	# PX4_GZ_MODELS is generated as <repo>/Tools/simulation/gz/models, so this
+	# derives <repo>/simulation_models/models and works after cloning elsewhere.
+	if [ ! -f "${MODEL_SDF_FILE}" ]; then
+		PX4_REPO_MODELS="${PX4_GZ_MODELS%/Tools/simulation/gz/models}/simulation_models/models"
+		if [ -f "${PX4_REPO_MODELS}/${MODEL_NAME}/model.sdf" ]; then
+			MODEL_SDF_FILE="${PX4_REPO_MODELS}/${MODEL_NAME}/model.sdf"
+		fi
+	fi
+
+	if [ ! -f "${MODEL_SDF_FILE}" ]; then
+		echo "ERROR [init] Model not found: ${MODEL_NAME}"
+		echo "ERROR [init] Checked: ${PX4_GZ_MODELS}/${MODEL_NAME}/model.sdf"
+		echo "ERROR [init] Checked repository path: ${PX4_GZ_MODELS%/Tools/simulation/gz/models}/simulation_models/models/${MODEL_NAME}/model.sdf"
+		exit 1
+	fi
+
 	echo "INFO  [init] Spawning model"
+	echo "INFO  [init] Using model file: ${MODEL_SDF_FILE}"
 
 	# Spawn model
 	${gz_command} service -s "/world/${PX4_GZ_WORLD}/create" --reqtype gz.msgs.EntityFactory \
 			--reptype gz.msgs.Boolean --timeout 5000 \
-			--req "sdf_filename: \"${PX4_GZ_MODELS}/${MODEL_NAME}/model.sdf\", name: \"${MODEL_NAME_INSTANCE}\", allow_renaming: false${POSE_ARG}" > /dev/null 2>&1
+			--req "sdf_filename: \"${MODEL_SDF_FILE}\", name: \"${MODEL_NAME_INSTANCE}\", allow_renaming: false${POSE_ARG}" > /dev/null 2>&1
 
 	# Wait for model to spawn
 	sleep 1
