@@ -42,19 +42,45 @@ param set-default SENS_EN_MAGSIM 1
 param set-default SENS_EN_ARSPDSIM 1
 
 # Airspeed and safety limits (tuned for simulation stability)
-param set-default FW_AIRSPD_MAX 28
-param set-default FW_AIRSPD_MIN 10
-param set-default FW_AIRSPD_STALL 8
-param set-default FW_AIRSPD_TRIM 16
-param set-default MIS_TAKEOFF_ALT 35
-param set-default NAV_LOITER_RAD 100
-param set-default FW_LND_ANG 5
-param set-default FW_LND_USETER 0
-param set-default FW_LND_ABORT 0
-param set-default RWTO_TKOFF 1
-param set-default RWTO_ROT_AIRSPD 18.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
+param set-default FW_AIRSPD_STALL 30     # 失速空速 [m/s]
+param set-default FW_AIRSPD_MIN 26       # TECS 使用的最小可控空速 [m/s]
+param set-default FW_AIRSPD_TRIM 40      # 巡航/配平空速 [m/s]
+param set-default FW_AIRSPD_MAX 55       # 最大允许空速 [m/s]
+param set-default FW_TKO_AIRSPD 40       # 起飞爬升阶段目标空速 [m/s]
+param set-default FW_LND_AIRSPD 30       # 降落进近目标空速 [m/s]
+param set-default FW_THR_MAX 0.75        # TECS 最大油门指令 [0,1]
+param set-default FW_THR_SLEW_MAX 0.30   # 最大油门变化率 [1/s]
+param set-default FW_T_CLMB_MAX 4.0      # FW_THR_MAX 油门下的最大爬升能力 [m/s]
+param set-default FW_T_CLMB_R_SP 4.0     # 默认爬升率设定 [m/s]
+param set-default FW_T_SINK_R_SP 3.0     # 默认下降率设定 [m/s]
+param set-default FW_T_SINK_MAX 3.0      # TECS 允许的最大下降率 [m/s]
+param set-default FW_T_SPDWEIGHT 1.0     # TECS 速度/高度平衡权重
+param set-default FW_P_LIM_MAX 20        # 最大抬头俯仰设定 [deg]
+param set-default FW_P_LIM_MIN -10       # 最大低头/俯冲设定 [deg]
+param set-default FW_TKO_PITCH_MIN 8     # 抬轮后的最小爬升俯仰角 [deg]
+param set-default FW_R_LIM 45            # 最大横滚角设定 [deg]
+param set-default MIS_TAKEOFF_ALT 45     # 默认任务起飞高度 [m]
+param set-default NAV_LOITER_RAD 800     # 任务导航使用的盘旋/转弯半径 [m]
+param set-default FW_LND_ANG 4           # 最终进近下滑角 [deg]
+param set-default FW_LND_USETER 0        # 禁用地形估计触发拉平
+param set-default FW_LND_ABORT 0         # 禁用基于地形条件的自动降落中止
+param set-default FW_LND_FLALT 6         # 相对降落点的最小拉平高度 [m]
+param set-default FW_LND_FL_TIME 2.0     # 动态拉平时间系数 [s]
+param set-default FW_LND_FL_SINK 0.6     # 拉平阶段目标下沉率 [m/s]
+param set-default FW_LND_FL_PMIN 1       # 拉平阶段最小俯仰角 [deg]
+param set-default FW_LND_FL_PMAX 8       # 拉平阶段最大俯仰角 [deg]
+param set-default FW_LND_TD_TIME 3.0     # 拉平开始后的预计接地时间 [s]
+param set-default FW_LND_THRTC_SC 0.6    # 低高度 TECS 高度时间常数缩放系数
+param set-default FW_T_THR_LOW_HGT 30    # 低于该高度时启用更紧的 TECS 高度跟踪 [m]
+param set-default RWTO_TKOFF 1           # 启用跑道起飞逻辑
+param set-default RWTO_MAX_THR 0.75      # 滑跑阶段最大油门 [0,1]
+param set-default RWTO_RAMP_TIME 5.0     # 从怠速爬升到 RWTO_MAX_THR 的时间 [s]
+param set-default RWTO_PSP 0.0           # 滑跑/抬轮前俯仰设定 [deg]
+param set-default RWTO_ROT_AIRSPD 35.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
+param set-default RWTO_ROT_TIME 2.0      # 抬轮过程中俯仰约束过渡时间 [s]
 param set-default RWTO_HDG 1            # 起飞滑跑前轮跟随航线方位(1=跟随航线, 0=锁定初始航向)
-param set-default FW_W_EN 1
+param set-default RWTO_NPFG_PERIOD 8.0   # 跑道转向阶段使用较慢的横向制导周期 [s]
+param set-default FW_W_EN 1              # 启用跑道滑跑/降落用前轮转向控制器
 
 # ---------------------------------------------------------------------------
 # Topology definition: 8 control surfaces matching Gazebo model
