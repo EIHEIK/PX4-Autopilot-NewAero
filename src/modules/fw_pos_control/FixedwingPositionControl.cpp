@@ -2562,7 +2562,8 @@ float
 FixedwingPositionControl::get_tecs_thrust()
 {
 	if (_tecs_is_running) {
-		return min(_tecs.get_throttle_setpoint(), 1.f);
+		return min(_tecs.get_throttle_setpoint(), _param_fw_thr_max.get());  //将 TECS 最终油门输出从硬夹到 1.0 改为硬夹到 FW_THR_MAX，
+		                                                                     //防止固定翼位置控制阶段意外满油门
 	}
 
 	// return 0 to prevent stale tecs state when it's not running
