@@ -149,6 +149,8 @@ private:
 		(ParamFloat<px4::params::FW_R_TC>) _param_fw_r_tc,
 
 		(ParamBool<px4::params::FW_W_EN>) _param_fw_w_en,
+		(ParamFloat<px4::params::FW_W_GSPD_SC>) _param_fw_w_gspd_sc,
+		(ParamFloat<px4::params::FW_W_TC>) _param_fw_w_tc,
 		(ParamFloat<px4::params::FW_W_RMAX>) _param_fw_w_rmax,
 		(ParamFloat<px4::params::FW_WR_FF>) _param_fw_wr_ff,
 		(ParamFloat<px4::params::FW_WR_I>) _param_fw_wr_i,

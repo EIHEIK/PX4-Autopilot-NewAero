@@ -1,0 +1,211 @@
+#!/bin/sh
+#
+# @name Canard Honghu Wing 150kg V5 Table Aero (Gazebo SITL)
+#
+# @type Plane with Canards
+# @class Plane
+#
+# @output Motor1 throttle
+# @output Servo1 left aileron
+# @output Servo2 right aileron
+# @output Servo3 left elevator
+# @output Servo4 right elevator
+# @output Servo5 left rudder
+# @output Servo6 right rudder
+# @output Servo7 left canard
+# @output Servo8 right canard
+#
+# @maintainer <your-email>
+#
+# NOTE: This airframe is copied from 4024 v3 and only switches the Gazebo model to the v5 lookup-aero variant.
+# NOTE: This airframe matches the Gazebo model honghu_wing_150kg_v5 servo ordering:
+#   Gazebo servo_0 = left_aileron  -> PX4 CS0
+#   Gazebo servo_1 = right_aileron -> PX4 CS1
+#   Gazebo servo_2 = left_elevator -> PX4 CS2
+#   Gazebo servo_3 = right_elevator-> PX4 CS3
+#   Gazebo servo_4 = left_rudder   -> PX4 CS4
+#   Gazebo servo_5 = right_rudder  -> PX4 CS5
+#   Gazebo servo_6 = left_canard   -> PX4 CS6
+#   Gazebo servo_7 = right_canard  -> PX4 CS7
+
+. ${R}etc/init.d/rc.fw_defaults
+
+# ---------------------------------------------------------------------------
+# Simulation environment core configuration
+# ---------------------------------------------------------------------------
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=honghu_wing_150kg_v5}
+
+param set-default SIM_GZ_EN 1
+param set-default SENS_EN_GPSSIM 1
+param set-default SENS_EN_MAGSIM 1
+param set-default SENS_EN_ARSPDSIM 1
+
+# Airspeed and safety limits (tuned for gentle V5 table-aero takeoff)
+param set-default FW_AIRSPD_STALL 30     # 失速空速 [m/s]
+param set-default FW_AIRSPD_MIN 26       # TECS 使用的最小可控空速 [m/s]
+param set-default FW_AIRSPD_TRIM 45      # 巡航/配平空速 [m/s]
+param set-default FW_AIRSPD_MAX 55       # 最大允许空速 [m/s]
+param set-default FW_TKO_AIRSPD 38       # 起飞爬升阶段目标空速 [m/s]
+param set-default FW_LND_AIRSPD 30       # 降落进近目标空速 [m/s]
+param set-default FW_THR_MAX 0.75        # TECS 最大油门指令，恢复足够推力
+param set-default FW_THR_SLEW_MAX 0.30   # 最大油门变化率 [1/s]
+param set-default FW_T_CLMB_MAX 4.0      # FW_THR_MAX 油门下的最大爬升能力 [m/s]
+param set-default FW_T_CLMB_R_SP 3.0     # 默认爬升率设定 [m/s]
+param set-default FW_T_SINK_R_SP 2.0     # 默认下降率设定 [m/s]
+param set-default FW_T_SINK_MAX 3.0      # TECS 允许的最大下降率 [m/s]
+param set-default FW_T_SPDWEIGHT 1.0     # TECS 速度/高度平衡权重
+param set-default FW_P_LIM_MAX 15        # 最大抬头俯仰设定 [deg]
+param set-default FW_P_LIM_MIN -10       # 最大低头/俯冲设定 [deg]
+param set-default FW_TKO_PITCH_MIN 6     # 抬轮后的最小爬升俯仰角 [deg]
+param set-default FW_P_RMAX_POS 12       # 最大抬头俯仰变化率 [deg/s]
+param set-default FW_P_RMAX_NEG 25       # 最大低头俯仰变化率 [deg/s]
+param set-default FW_R_LIM 35            # 最大横滚角设定 [deg]
+param set-default MIS_TAKEOFF_ALT 30     # 默认任务起飞高度 [m]
+param set-default NAV_LOITER_RAD 500     # 任务导航使用的盘旋/转弯半径 [m]
+
+# ---------------------------------------------------------------------------
+# Attitude controller gains inherited from the latest stable V3 simulation
+# ---------------------------------------------------------------------------
+# V5 第一阶段只替换气动模型，飞控内环先不要落回 PX4 默认固定翼参数。
+# 这些值来自此前 V3 调参结果，用于压住 150kg 模型起飞后俯仰/横滚发散。
+param set FW_AT_APPLY 0
+param set FW_PR_D 0.12
+param set FW_PR_FF 0.10
+param set FW_PR_I 0.06
+param set FW_PR_IMAX 0.40
+param set FW_PR_P 0.22
+param set FW_P_TC 1.2
+
+param set FW_RR_D 0.755
+param set FW_RR_FF 5.450
+param set FW_RR_I 0.305
+param set FW_RR_IMAX 0.20
+param set FW_RR_P 0.75
+param set FW_R_RMAX 25
+param set FW_R_TC 0.8
+
+param set FW_YR_D 0
+param set FW_YR_FF 0.04
+param set FW_YR_I 0.10
+param set FW_YR_IMAX 0.20
+param set FW_YR_P 0.20
+
+param set-default FW_LND_ANG 4           # 最终进近下滑角 [deg]
+param set-default FW_LND_USETER 0        # 禁用地形估计触发拉平
+param set-default FW_LND_ABORT 0         # 禁用基于地形条件的自动降落中止
+param set-default FW_LND_FLALT 6         # 相对降落点的最小拉平高度 [m]
+param set-default FW_LND_FL_TIME 2.0     # 动态拉平时间系数 [s]
+param set-default FW_LND_FL_SINK 0.6     # 拉平阶段目标下沉率 [m/s]
+param set-default FW_LND_FL_PMIN 1       # 拉平阶段最小俯仰角 [deg]
+param set-default FW_LND_FL_PMAX 8       # 拉平阶段最大俯仰角 [deg]
+param set-default FW_LND_TD_TIME 3.0     # 拉平开始后的预计接地时间 [s]
+param set-default FW_LND_THRTC_SC 0.6    # 低高度 TECS 高度时间常数缩放系数
+param set-default FW_T_THR_LOW_HGT 20    # 低于该高度时启用更紧的 TECS 高度跟踪 [m]
+param set-default RWTO_TKOFF 1           # 启用跑道起飞逻辑
+param set-default RWTO_MAX_THR 0.75      # 滑跑阶段最大油门
+param set-default RWTO_RAMP_TIME 5.0     # 油门爬升时间 [s]，快速加速避免低速转圈
+param set-default RWTO_PSP 0.0           # 滑跑/抬轮前俯仰设定 [deg]
+param set-default RWTO_ROT_AIRSPD 35.0  # 抬轮触发空速 [m/s]
+param set-default RWTO_ROT_TIME 5.0      # 抬轮过程中俯仰约束过渡时间 [s]
+param set-default RWTO_HDG 1            # 起飞滑跑前轮跟随航线方位
+param set-default RWTO_NPFG_PERIOD 8.0   # 跑道转向阶段使用较慢的横向制导周期 [s]
+# Gazebo 舵机角度映射：V5 首轮保持 V3 的鸭翼控制范围，servo=0 对应约 4deg，servo=0.5 对应约 9deg。
+# 机械气动刹车范围 -50deg ~ +15deg 仍由 SDF joint limit 保留，后续降落/刹车再单独扩展映射。
+param set-default SIM_GZ_SV_MINA7 -6
+param set-default SIM_GZ_SV_MAXA7 14
+param set-default SIM_GZ_SV_MINA8 -6
+param set-default SIM_GZ_SV_MAXA8 14
+param set-default FW_W_EN 1              # 启用跑道滑跑/降落用前轮转向控制器
+
+# ---------------------------------------------------------------------------
+# SITL: 完全禁用 RC 检查。COM_RC_IN_MODE=4(StickInputDisabled) 使 failsafe.cpp:479
+# 的 CHECK_FAILSAFE(manual_control_signal_lost) 永不触发，无论处于何种 nav 模式。
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# SITL: 无遥控器/无QGC手动控制下的自主飞行
+# COM_RC_IN_MODE=4(StickInputDisabled): 所有模式不检查RC信号
+# SYS_AUTOCONFIG=1: 自动标定传感器（抑制QGC预检弹窗）
+# COM_POS_FS_EPH=-1: 禁用位置精度failsafe
+# ---------------------------------------------------------------------------
+# SITL 自主飞行：StickInputDisabled(4) 彻底禁用RC检查，确保arm不因mode切换而disarm
+param set-default COM_RC_IN_MODE 4
+param set-default COM_RCL_EXCEPT 3
+param set-default SYS_AUTOCONFIG 1
+param set-default COM_POS_FS_EPH -1
+
+# ---------------------------------------------------------------------------
+# Topology definition: 8 control surfaces matching Gazebo model
+# ---------------------------------------------------------------------------
+param set-default CA_AIRFRAME 1
+param set-default CA_ROTOR_COUNT 1
+param set-default CA_ROTOR0_PX -0.75
+param set-default CA_SV_CS_COUNT 8
+
+# ---------------------------------------------------------------------------
+# Control allocation mapping (matches Gazebo servo_0..servo_7 order)
+# ---------------------------------------------------------------------------
+# 0: Left Aileron -- roll control
+param set-default CA_SV_CS0_TYPE  1
+param set-default CA_SV_CS0_TRQ_R -0.5
+
+# 1: Right Aileron -- roll control
+param set-default CA_SV_CS1_TYPE  2
+param set-default CA_SV_CS1_TRQ_R 0.5
+
+# 2: Left Elevator -- pitch control
+param set-default CA_SV_CS2_TYPE  3
+param set-default CA_SV_CS2_TRQ_P 0.5
+
+# 3: Right Elevator -- pitch control
+param set-default CA_SV_CS3_TYPE  3
+param set-default CA_SV_CS3_TRQ_P 0.5
+
+# 4: Left Rudder -- yaw control
+param set-default CA_SV_CS4_TYPE  4
+param set-default CA_SV_CS4_TRQ_Y 1.0
+
+# 5: Right Rudder -- yaw control
+param set-default CA_SV_CS5_TYPE  4
+param set-default CA_SV_CS5_TRQ_Y 1.0
+
+# 6: Left Canard -- auxiliary pitch via canard state machine
+param set-default CA_SV_CS6_TYPE  19
+param set-default CA_SV_CS6_TRQ_P -0.5
+param set-default CA_SV_CS6_CANARD 1.0
+
+# 7: Right Canard -- auxiliary pitch via canard state machine
+param set-default CA_SV_CS7_TYPE  20
+param set-default CA_SV_CS7_TRQ_P -0.5
+param set-default CA_SV_CS7_CANARD 1.0
+
+# ---------------------------------------------------------------------------
+# Gazebo simulation output bridge
+# ---------------------------------------------------------------------------
+param set-default SIM_GZ_EC_FUNC1 101 # Motor 1 throttle
+
+param set-default SIM_GZ_SV_FUNC1 201 # Servo 1 -> CS0 (left aileron)
+param set-default SIM_GZ_SV_FUNC2 202 # Servo 2 -> CS1 (right aileron)
+param set-default SIM_GZ_SV_FUNC3 203 # Servo 3 -> CS2 (left elevator)
+param set-default SIM_GZ_SV_FUNC4 204 # Servo 4 -> CS3 (right elevator)
+param set-default SIM_GZ_SV_FUNC5 205 # Servo 5 -> CS4 (left rudder)
+param set-default SIM_GZ_SV_FUNC6 206 # Servo 6 -> CS5 (right rudder)
+param set-default SIM_GZ_SV_FUNC7 207 # Servo 7 -> CS6 (left canard)
+param set-default SIM_GZ_SV_FUNC8 208 # Servo 8 -> CS7 (right canard)
+
+param set-default SIM_GZ_EC_MIN1 10
+param set-default SIM_GZ_EC_MAX1 4500
+param set-default FD_ESCS_EN 0
+
+# ---------------------------------------------------------------------------
+# Canard state machine parameters
+# ---------------------------------------------------------------------------
+# FW_CANARD_TO:  Takeoff cruise canard setting (0=neutral, 1=max trailing-edge-down)
+param set-default FW_CANARD_TO     0.7  # 增大鸭翼偏角提供更多抬头力矩（原0.5→4°, 现0.7→8°）
+# FW_CANARD_BRK: Aerodynamic braking canard setting (0=neutral, 1=max trailing-edge-up)
+param set-default FW_CANARD_BRK    1.0
+# FW_CANARD_LND_H:  Touchdown AGL height threshold [m]
+param set-default FW_CANARD_LND_H  0.1
+# FW_CANARD_LND_NZ: Touchdown normal load factor threshold [g]
+param set-default FW_CANARD_LND_NZ 1.5

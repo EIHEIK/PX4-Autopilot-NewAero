@@ -358,7 +358,29 @@ void FixedwingRateControl::Run()
 					body_rates_setpoint = Vector3f(-_rates_sp.yaw, _rates_sp.pitch, _rates_sp.roll);
 				}
 
-				const Vector3f gain_ff(_param_fw_rr_ff.get(), _param_fw_pr_ff.get(), _param_fw_yr_ff.get());
+				_vehicle_attitude_setpoint_sub.update(&_attitude_sp);
+				float pitch_rate_ff = _param_fw_pr_ff.get();
+
+				if (_param_fw_pr_ff_rwto.get() >= 0.f
+				    && _attitude_sp.fw_control_yaw_wheel
+				    && body_rates_setpoint(1) > 0.f) {
+					// A runway aircraft may need a larger initial elevator command to
+					// unload the nose wheel. Treat FW_PR_FF_RWTO as breakaway FF only.
+					// Remove it over the small measured-rate interval FW_PR_RWTO_Q,
+					// rather than retaining it until the full attitude-controller rate
+					// setpoint is reached. This prevents stored runway pitching moment
+					// from becoming an airborne pitch-rate spike. A negative FF value
+					// still preserves legacy behavior exactly.
+					const float breakaway_release_rate = math::max(
+							math::min(body_rates_setpoint(1), radians(_param_fw_pr_rwto_q.get())),
+							FLT_EPSILON);
+					const float rotation_progress = math::constrain(
+							math::max(rates(1), 0.f) / breakaway_release_rate, 0.f, 1.f);
+					pitch_rate_ff = _param_fw_pr_ff_rwto.get()
+							+ rotation_progress * (_param_fw_pr_ff.get() - _param_fw_pr_ff_rwto.get());
+				}
+
+				const Vector3f gain_ff(_param_fw_rr_ff.get(), pitch_rate_ff, _param_fw_yr_ff.get());
 				const Vector3f scaled_gain_ff = gain_ff / _airspeed_scaling;
 				_rate_control.setFeedForwardGain(scaled_gain_ff);
 

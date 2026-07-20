@@ -951,6 +951,415 @@ FixedwingPositionControl::control_auto(const float control_interval, const Vecto
 }
 
 void
+FixedwingPositionControl::update_ground_heading_course_offset(const float control_interval, const Vector2f &ground_speed,
+		float nominal_bearing, bool &offset_valid, float &heading_course_offset)
+{
+	if (!offset_valid) {
+		// At standstill, preserve the current physical runway alignment even if
+		// EKF magnetic yaw has not completed its final alignment.
+		heading_course_offset = wrap_pi(_yaw - nominal_bearing);
+		offset_valid = true;
+	}
+
+	const float ground_speed_norm = ground_speed.norm();
+
+	if (ground_speed_norm > 2.f && PX4_ISFINITE(ground_speed(0)) && PX4_ISFINITE(ground_speed(1))) {
+		const float course = atan2f(ground_speed(1), ground_speed(0));
+		const float measured_offset = wrap_pi(_yaw - course);
+		// Keep this estimate fast: it removes magnetic-yaw bias from the wheel loop.
+		// A slow filter adds phase lag to the cross-track loop and causes a long-period weave.
+		const float alpha = math::constrain(control_interval / 0.25f, 0.f, 1.f);
+		heading_course_offset = wrap_pi(heading_course_offset
+				+ alpha * wrap_pi(measured_offset - heading_course_offset));
+	}
+}
+
+void
+FixedwingPositionControl::control_auto_ground_taxi_test(const float control_interval, const Vector2f &ground_speed,
+		const mission_s &mission)
+{
+	const Vector2f local_position{_local_pos.x, _local_pos.y};
+
+	if (!_ground_taxi_initialized) {
+		_ground_taxi_initialized = true;
+		_ground_taxi_warned_no_target = false;
+		_ground_taxi_warned_route_load = false;
+		_ground_taxi_time_initialized = _local_pos.timestamp;
+		_ground_taxi_start_pos = local_position;
+		_ground_taxi_throttle_integrator = 0.f;
+		_ground_taxi_route_valid = false;
+		_ground_taxi_route_finished = false;
+		_ground_taxi_route_count = 0;
+		_ground_taxi_route_index = 0;
+		_ground_taxi_yaw_sp = _yaw;
+		_ground_taxi_heading_course_offset_valid = false;
+	}
+
+	update_ground_taxi_route(mission);
+
+	Vector2f segment_start = _ground_taxi_start_pos;
+	Vector2f segment_end{};
+	bool target_valid = _ground_taxi_route_valid && !_ground_taxi_route_finished;
+
+	if (target_valid) {
+		if (_ground_taxi_route_index > 0) {
+			segment_start = _ground_taxi_route[_ground_taxi_route_index - 1].local_pos;
+		}
+
+		while (_ground_taxi_route_index < _ground_taxi_route_count) {
+			const GroundTaxiRoutePoint &target = _ground_taxi_route[_ground_taxi_route_index];
+			const float fallback_acceptance = math::max(_param_rwto_taxi_acc_rad.get(), 1.f);
+			const float acceptance_radius = (PX4_ISFINITE(target.acceptance_radius) && target.acceptance_radius > 1.f) ?
+						target.acceptance_radius : fallback_acceptance;
+
+			const Vector2f vector_prev_to_curr = target.local_pos - segment_start;
+			const Vector2f vector_curr_to_vehicle = local_position - target.local_pos;
+			const float dist_to_target = vector_curr_to_vehicle.norm();
+			bool passed_curr_wp = false;
+
+			const float segment_length_for_pass = vector_prev_to_curr.norm();
+
+			if (segment_length_for_pass > 1.0e-6f) {
+				const Vector2f line_unit_for_pass = vector_prev_to_curr / segment_length_for_pass;
+				const Vector2f vehicle_from_segment_start = local_position - segment_start;
+				const float cross_track_for_pass = fabsf(line_unit_for_pass(0) * vehicle_from_segment_start(1)
+										 - line_unit_for_pass(1) * vehicle_from_segment_start(0));
+
+				// The airborne mission logic advances once the vehicle passes the waypoint plane.
+				// Ground taxi has much weaker lateral authority: if the vehicle is still far
+				// away from the segment, advancing here makes it abandon the turn and continue
+				// straight. Only allow pass-based switching near the intended ground line.
+				passed_curr_wp = vector_prev_to_curr.dot(vector_curr_to_vehicle) > 0.f
+							 && cross_track_for_pass <= acceptance_radius;
+			}
+
+			if (dist_to_target > acceptance_radius && !passed_curr_wp) {
+				break;
+			}
+
+			PX4_INFO("RWTO_TAXI_TEST: reached taxi point %d by %s", _ground_taxi_route_index + 1,
+				 passed_curr_wp ? "passing" : "radius");
+			segment_start = target.local_pos;
+			_ground_taxi_route_index++;
+		}
+
+		if (_ground_taxi_route_index < _ground_taxi_route_count) {
+			segment_end = _ground_taxi_route[_ground_taxi_route_index].local_pos;
+
+		} else {
+			_ground_taxi_route_finished = true;
+			target_valid = false;
+
+		}
+	}
+
+	const Vector2f segment_vector = segment_end - segment_start;
+	const float segment_length = segment_vector.norm();
+	const bool line_valid = target_valid && segment_length > 1.f;
+
+	float yaw_body = _yaw;
+	float throttle = _param_fw_thr_idle.get();
+
+	if (line_valid) {
+		_ground_taxi_warned_no_target = false;
+		const Vector2f line_unit = segment_vector / segment_length;
+		const Vector2f relative_position = local_position - segment_start;
+		const float segment_bearing = atan2f(line_unit(1), line_unit(0));
+
+		const float signed_cross_track_error = line_unit(0) * relative_position(1) - line_unit(1) * relative_position(0);
+		const float max_correction = radians(_param_rwto_taxi_xtk_max.get());
+		const float yaw_correction = math::constrain(-_param_rwto_taxi_xtk_p.get() * signed_cross_track_error,
+					     -max_correction, max_correction);
+		update_ground_heading_course_offset(control_interval, ground_speed, segment_bearing,
+				_ground_taxi_heading_course_offset_valid, _ground_taxi_heading_course_offset);
+		yaw_body = wrap_pi(segment_bearing + _ground_taxi_heading_course_offset + yaw_correction);
+		const float yaw_rate_limit = radians(_param_rwto_taxi_yrmax.get());
+
+		if (yaw_rate_limit > FLT_EPSILON) {
+			const float yaw_step = math::constrain(wrap_pi(yaw_body - _ground_taxi_yaw_sp),
+					       -yaw_rate_limit * control_interval, yaw_rate_limit * control_interval);
+			_ground_taxi_yaw_sp = wrap_pi(_ground_taxi_yaw_sp + yaw_step);
+			yaw_body = _ground_taxi_yaw_sp;
+
+		} else {
+			_ground_taxi_yaw_sp = yaw_body;
+		}
+
+		const float ground_speed_norm = ground_speed.norm();
+		const bool taxi_time_expired = (_param_rwto_taxi_time.get() > FLT_EPSILON)
+					       && (hrt_elapsed_time(&_ground_taxi_time_initialized) > _param_rwto_taxi_time.get() * 1_s);
+		const bool taxi_airspeed_exceeded = (_param_rwto_taxi_arsp.get() > FLT_EPSILON)
+						  && (_airspeed_eas > _param_rwto_taxi_arsp.get());
+		const bool taxi_groundspeed_exceeded = (_param_rwto_taxi_gspd.get() > FLT_EPSILON)
+						     && (ground_speed_norm > _param_rwto_taxi_gspd.get());
+
+		if (taxi_time_expired || taxi_airspeed_exceeded || taxi_groundspeed_exceeded) {
+			_ground_taxi_throttle_integrator = 0.f;
+
+		} else {
+			const float speed_error = math::max(_param_rwto_taxi_spd.get(), 0.f) - ground_speed_norm;
+			const float throttle_min = math::constrain(_param_rwto_taxi_thr_min.get(), 0.f, 1.f);
+			const float throttle_max = math::constrain(_param_rwto_taxi_thr_max.get(), throttle_min, 1.f);
+			const float integrator_limit = throttle_max - throttle_min;
+			_ground_taxi_throttle_integrator = math::constrain(_ground_taxi_throttle_integrator
+							     + speed_error * _param_rwto_taxi_spd_i.get() * control_interval,
+							     -integrator_limit, integrator_limit);
+			throttle = math::constrain(_param_rwto_taxi_thr_ff.get()
+						   + _param_rwto_taxi_spd_p.get() * speed_error
+						   + _ground_taxi_throttle_integrator,
+						   throttle_min, throttle_max);
+		}
+
+		vehicle_local_position_setpoint_s local_pos_sp{};
+		local_pos_sp.timestamp = hrt_absolute_time();
+		local_pos_sp.x = segment_end(0);
+		local_pos_sp.y = segment_end(1);
+		local_pos_sp.z = _local_pos.z;
+		local_pos_sp.vx = line_unit(0) * _param_rwto_taxi_spd.get();
+		local_pos_sp.vy = line_unit(1) * _param_rwto_taxi_spd.get();
+		local_pos_sp.vz = 0.f;
+		local_pos_sp.yaw = yaw_body;
+		local_pos_sp.thrust[0] = throttle;
+		_local_pos_sp_pub.publish(local_pos_sp);
+
+	} else {
+		_ground_taxi_throttle_integrator = 0.f;
+
+		if (!_ground_taxi_warned_no_target) {
+			PX4_WARN("RWTO_TAXI_TEST: no valid mission taxi line, holding current heading");
+			_ground_taxi_warned_no_target = true;
+		}
+	}
+
+	const Quatf attitude_setpoint(Eulerf(0.f, 0.f, yaw_body));
+	attitude_setpoint.copyTo(_att_sp.q_d);
+
+	_att_sp.reset_integral = false;
+	_att_sp.fw_control_yaw_wheel = true;
+	_att_sp.yaw_sp_move_rate = 0.f;
+	_att_sp.thrust_body[0] = throttle;
+	_att_sp.thrust_body[1] = 0.f;
+	_att_sp.thrust_body[2] = 0.f;
+
+	_flaps_setpoint = 0.f;
+	_spoilers_setpoint = 0.f;
+	_new_landing_gear_position = landing_gear_s::GEAR_DOWN;
+}
+
+
+bool
+FixedwingPositionControl::update_ground_taxi_route_yaw_sp(const float control_interval, const Vector2f &local_position,
+		float &yaw_body)
+{
+	if (!_ground_taxi_initialized) {
+		_ground_taxi_initialized = true;
+		_ground_taxi_warned_no_target = false;
+		_ground_taxi_warned_route_load = false;
+		_ground_taxi_time_initialized = _local_pos.timestamp;
+		_ground_taxi_start_pos = local_position;
+		_ground_taxi_throttle_integrator = 0.f;
+		_ground_taxi_route_valid = false;
+		_ground_taxi_route_finished = false;
+		_ground_taxi_route_count = 0;
+		_ground_taxi_route_index = 0;
+		_ground_taxi_yaw_sp = _yaw;
+		_ground_taxi_heading_course_offset_valid = false;
+	}
+
+	update_ground_taxi_route(_mission);
+
+	Vector2f segment_start = _ground_taxi_start_pos;
+	Vector2f segment_end{};
+	bool target_valid = _ground_taxi_route_valid && !_ground_taxi_route_finished;
+
+	if (target_valid) {
+		if (_ground_taxi_route_index > 0) {
+			segment_start = _ground_taxi_route[_ground_taxi_route_index - 1].local_pos;
+		}
+
+		while (_ground_taxi_route_index < _ground_taxi_route_count) {
+			const GroundTaxiRoutePoint &target = _ground_taxi_route[_ground_taxi_route_index];
+			const float fallback_acceptance = math::max(_param_rwto_taxi_acc_rad.get(), 1.f);
+			const float acceptance_radius = (PX4_ISFINITE(target.acceptance_radius) && target.acceptance_radius > 1.f) ?
+							target.acceptance_radius : fallback_acceptance;
+
+			const Vector2f vector_prev_to_curr = target.local_pos - segment_start;
+			const Vector2f vector_curr_to_vehicle = local_position - target.local_pos;
+			const float dist_to_target = vector_curr_to_vehicle.norm();
+			bool passed_curr_wp = false;
+
+			const float segment_length_for_pass = vector_prev_to_curr.norm();
+
+			if (segment_length_for_pass > 1.0e-6f) {
+				const Vector2f line_unit_for_pass = vector_prev_to_curr / segment_length_for_pass;
+				const Vector2f vehicle_from_segment_start = local_position - segment_start;
+				const float cross_track_for_pass = fabsf(line_unit_for_pass(0) * vehicle_from_segment_start(1)
+									 - line_unit_for_pass(1) * vehicle_from_segment_start(0));
+
+				passed_curr_wp = vector_prev_to_curr.dot(vector_curr_to_vehicle) > 0.f
+						 && cross_track_for_pass <= acceptance_radius;
+			}
+
+			if (dist_to_target > acceptance_radius && !passed_curr_wp) {
+				break;
+			}
+
+			PX4_INFO("RWTO_TAXI_TEST: reached taxi point %d by %s", _ground_taxi_route_index + 1,
+				 passed_curr_wp ? "passing" : "radius");
+			segment_start = target.local_pos;
+			_ground_taxi_route_index++;
+		}
+
+		if (_ground_taxi_route_index < _ground_taxi_route_count) {
+			segment_end = _ground_taxi_route[_ground_taxi_route_index].local_pos;
+
+		} else {
+			_ground_taxi_route_finished = true;
+			target_valid = false;
+		}
+	}
+
+	const Vector2f segment_vector = segment_end - segment_start;
+	const float segment_length = segment_vector.norm();
+	const bool line_valid = target_valid && segment_length > 1.f;
+
+	if (!line_valid) {
+		if (!_ground_taxi_warned_no_target) {
+			PX4_WARN("RWTO_TAXI_TEST: no valid mission taxi line, holding current heading");
+			_ground_taxi_warned_no_target = true;
+		}
+
+		return false;
+	}
+
+	_ground_taxi_warned_no_target = false;
+	const Vector2f line_unit = segment_vector / segment_length;
+	const Vector2f relative_position = local_position - segment_start;
+	const float segment_bearing = atan2f(line_unit(1), line_unit(0));
+	const float signed_cross_track_error = line_unit(0) * relative_position(1) - line_unit(1) * relative_position(0);
+	const float max_correction = radians(_param_rwto_taxi_xtk_max.get());
+	const float yaw_correction = math::constrain(-_param_rwto_taxi_xtk_p.get() * signed_cross_track_error,
+					     -max_correction, max_correction);
+	const Vector2f ground_speed{_local_pos.vx, _local_pos.vy};
+	update_ground_heading_course_offset(control_interval, ground_speed, segment_bearing,
+			_ground_taxi_heading_course_offset_valid, _ground_taxi_heading_course_offset);
+	yaw_body = wrap_pi(segment_bearing + _ground_taxi_heading_course_offset + yaw_correction);
+
+	const float yaw_rate_limit = radians(_param_rwto_taxi_yrmax.get());
+
+	if (yaw_rate_limit > FLT_EPSILON) {
+		const float yaw_step = math::constrain(wrap_pi(yaw_body - _ground_taxi_yaw_sp),
+					       -yaw_rate_limit * control_interval, yaw_rate_limit * control_interval);
+		_ground_taxi_yaw_sp = wrap_pi(_ground_taxi_yaw_sp + yaw_step);
+	yaw_body = _ground_taxi_yaw_sp;
+
+	} else {
+		_ground_taxi_yaw_sp = yaw_body;
+	}
+
+	return true;
+}
+
+bool
+FixedwingPositionControl::update_ground_taxi_route(const mission_s &mission)
+{
+	const bool local_ref_valid = _local_pos.xy_global
+				     && PX4_ISFINITE(_local_pos.ref_lat)
+				     && PX4_ISFINITE(_local_pos.ref_lon)
+				     && _local_pos.ref_timestamp > 0;
+
+	if (!local_ref_valid) {
+		reset_ground_taxi_route();
+		return false;
+	}
+
+	if (mission.timestamp == 0 || mission.count == 0) {
+		reset_ground_taxi_route();
+		return false;
+	}
+
+	const bool local_ref_changed = _local_pos.ref_timestamp != _ground_taxi_loaded_ref_timestamp
+				       || fabs(_local_pos.ref_lat - _ground_taxi_loaded_ref_lat) > 1e-9
+				       || fabs(_local_pos.ref_lon - _ground_taxi_loaded_ref_lon) > 1e-9;
+
+	const bool mission_changed = !_ground_taxi_route_valid
+				     || local_ref_changed
+				     || mission.mission_id != _ground_taxi_loaded_mission_id
+				     || mission.count != _ground_taxi_loaded_mission_count
+				     || mission.mission_dataman_id != _ground_taxi_loaded_mission_dataman_id;
+
+	if (!mission_changed) {
+		return _ground_taxi_route_valid;
+	}
+
+	reset_ground_taxi_route();
+	_ground_taxi_start_pos = Vector2f{_local_pos.x, _local_pos.y};
+	_ground_taxi_throttle_integrator = 0.f;
+	_ground_taxi_yaw_sp = _yaw;
+	_ground_taxi_loaded_mission_id = mission.mission_id;
+	_ground_taxi_loaded_mission_count = mission.count;
+	_ground_taxi_loaded_mission_dataman_id = mission.mission_dataman_id;
+	_ground_taxi_loaded_ref_timestamp = _local_pos.ref_timestamp;
+	_ground_taxi_loaded_ref_lat = _local_pos.ref_lat;
+	_ground_taxi_loaded_ref_lon = _local_pos.ref_lon;
+
+	const dm_item_t mission_dataman_id = static_cast<dm_item_t>(mission.mission_dataman_id);
+
+	for (uint16_t i = 0; i < mission.count && _ground_taxi_route_count < GROUND_TAXI_ROUTE_MAX_POINTS; i++) {
+		mission_item_s mission_item{};
+		const bool success = _ground_taxi_dataman_client.readSync(mission_dataman_id, i,
+				     reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item), GROUND_TAXI_DATAMAN_LOAD_WAIT);
+
+		if (!success) {
+			if (!_ground_taxi_warned_route_load) {
+				PX4_WARN("RWTO_TAXI_TEST: failed to read mission item %u", i);
+				_ground_taxi_warned_route_load = true;
+			}
+
+			continue;
+		}
+
+		if ((mission_item.nav_cmd != NAV_CMD_TAKEOFF && mission_item.nav_cmd != NAV_CMD_WAYPOINT)
+		    || !PX4_ISFINITE(mission_item.lat) || !PX4_ISFINITE(mission_item.lon)) {
+			continue;
+		}
+
+		GroundTaxiRoutePoint &route_point = _ground_taxi_route[_ground_taxi_route_count++];
+		route_point.local_pos = _global_local_proj_ref.project(mission_item.lat, mission_item.lon);
+		route_point.acceptance_radius = mission_item.acceptance_radius;
+	}
+
+	_ground_taxi_route_valid = _ground_taxi_route_count > 0;
+
+	if (_ground_taxi_route_valid) {
+		_ground_taxi_warned_no_target = false;
+		PX4_INFO("RWTO_TAXI_TEST: loaded %d mission taxi points", _ground_taxi_route_count);
+
+	} else if (!_ground_taxi_warned_route_load) {
+		PX4_WARN("RWTO_TAXI_TEST: no TAKEOFF/WAYPOINT mission items");
+		_ground_taxi_warned_route_load = true;
+	}
+
+	return _ground_taxi_route_valid;
+}
+
+void
+FixedwingPositionControl::reset_ground_taxi_route()
+{
+	_ground_taxi_route_valid = false;
+	_ground_taxi_route_finished = false;
+	_ground_taxi_route_count = 0;
+	_ground_taxi_route_index = 0;
+	_ground_taxi_loaded_mission_id = 0;
+	_ground_taxi_loaded_mission_count = 0;
+	_ground_taxi_loaded_mission_dataman_id = 0;
+	_ground_taxi_loaded_ref_timestamp = 0;
+	_ground_taxi_loaded_ref_lat = (double)NAN;
+	_ground_taxi_loaded_ref_lon = (double)NAN;
+	_ground_taxi_heading_course_offset_valid = false;
+}
+
+void
 FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_interval)
 {
 	const bool is_low_height = checkLowHeightConditions();
@@ -1495,7 +1904,8 @@ FixedwingPositionControl::control_auto_path(const float control_interval, const 
 
 void
 FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const float control_interval,
-		const Vector2d &global_position, const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr)
+		const Vector2d &global_position, const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr,
+		const position_setpoint_s &pos_sp_next)
 {
 	if (!_control_mode.flag_armed) {
 		reset_takeoff_state();
@@ -1510,6 +1920,30 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 	const float altitude_setpoint_amsl = clearance_altitude_amsl + kClearanceAltitudeBuffer;
 
 	Vector2f local_2D_position{_local_pos.x, _local_pos.y};
+
+	// A TAKEOFF item placed at the launch position is a valid way to specify only
+	// the clearance altitude. Do not derive a runway direction from millimetre-
+	// scale projection/GPS differences in that case: use the next mission point.
+	auto mission_takeoff_bearing = [this, &pos_sp_next](const Vector2f &start_pos_local,
+					    const Vector2f &takeoff_waypoint_local, const float fallback_bearing) {
+		const float direction_min_distance = math::max(_param_rwto_dir_min.get(), FLT_EPSILON);
+		const Vector2f takeoff_bearing_vector = takeoff_waypoint_local - start_pos_local;
+
+		if (takeoff_bearing_vector.norm() >= direction_min_distance) {
+			return atan2f(takeoff_bearing_vector(1), takeoff_bearing_vector(0));
+		}
+
+		if (PX4_ISFINITE(pos_sp_next.lat) && PX4_ISFINITE(pos_sp_next.lon)) {
+			const Vector2f next_waypoint_local = _global_local_proj_ref.project(pos_sp_next.lat, pos_sp_next.lon);
+			const Vector2f next_bearing_vector = next_waypoint_local - start_pos_local;
+
+			if (next_bearing_vector.norm() >= direction_min_distance) {
+				return atan2f(next_bearing_vector(1), next_bearing_vector(0));
+			}
+		}
+
+		return fallback_bearing;
+	};
 
 	const float takeoff_airspeed = (_param_fw_tko_airspd.get() > FLT_EPSILON) ? _param_fw_tko_airspd.get() :
 				       _performance_model.getMinimumCalibratedAirspeed(getLoadFactor());
@@ -1538,7 +1972,7 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 			_runway_takeoff.forceSetFlyState();
 		}
 
-		_runway_takeoff.update(now, takeoff_airspeed, _airspeed_eas, _current_altitude - _takeoff_ground_alt,
+		_runway_takeoff.update(now, takeoff_airspeed, _airspeed_eas, ground_speed.norm(), _current_altitude - _takeoff_ground_alt,
 				       clearance_altitude_amsl - _takeoff_ground_alt);
 
 		// yaw control is disabled once in "taking off" state
@@ -1561,14 +1995,40 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 		// by default set the takeoff bearing to the takeoff yaw, but override in a mission takeoff with bearing to takeoff WP
 		float takeoff_bearing = _launch_current_yaw;//最终确定的目标航向，单位为弧度，以北为0，顺时针增加。
+		const bool follow_takeoff_waypoint = (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION)
+						     || _runway_takeoff.taxiTestEnabled();
 
-		if (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION) {//另一种航向控制（自主飞行中）
-			// the bearing from runway start to the takeoff waypoint is followed until the clearance altitude is exceeded
-			const Vector2f takeoff_bearing_vector = takeoff_waypoint_local - start_pos_local;
+		if (follow_takeoff_waypoint
+		    && PX4_ISFINITE(pos_sp_curr.lat)
+		    && PX4_ISFINITE(pos_sp_curr.lon)) {//另一种航向控制（自主飞行中/地面滑行测试）
+			// A coincident TAKEOFF item falls back to the next mission waypoint.
+			takeoff_bearing = mission_takeoff_bearing(start_pos_local, takeoff_waypoint_local, takeoff_bearing);
+		}
 
-			if (takeoff_bearing_vector.norm() > FLT_EPSILON) {
-				takeoff_bearing = atan2f(takeoff_bearing_vector(1), takeoff_bearing_vector(0));//向量与标准参考方向间的夹角
+		float runway_heading_bearing = takeoff_bearing;
+
+		if (_runway_takeoff.controlYaw() && follow_takeoff_waypoint) {
+			update_ground_heading_course_offset(control_interval, ground_speed, takeoff_bearing,
+					_runway_heading_course_offset_valid, _runway_heading_course_offset);
+
+			float runway_cross_track_correction = 0.f;
+
+			// Opt-in with RWTO_WHEEL_HGT so legacy airframes retain their exact
+			// runway-heading behavior. Reuse the independently validated taxi
+			// line gain and limit while the wheel is physically in contact.
+			if (_runway_takeoff.getWheelControlHeight() > FLT_EPSILON) {
+				const Vector2f runway_unit{cosf(takeoff_bearing), sinf(takeoff_bearing)};
+				const Vector2f relative_position = local_2D_position - start_pos_local;
+				const float signed_cross_track_error = runway_unit(0) * relative_position(1)
+								       - runway_unit(1) * relative_position(0);
+				const float max_correction = radians(_param_rwto_taxi_xtk_max.get());
+				runway_cross_track_correction = math::constrain(
+					-_param_rwto_taxi_xtk_p.get() * signed_cross_track_error,
+					-max_correction, max_correction);
 			}
+
+			runway_heading_bearing = wrap_pi(takeoff_bearing + _runway_heading_course_offset
+						       + runway_cross_track_correction);
 		}
 
 		float target_airspeed = adapt_airspeed_setpoint(control_interval, takeoff_airspeed, adjusted_min_airspeed, ground_speed,
@@ -1582,8 +2042,10 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 		target_airspeed = _npfg.getAirspeedRef() / _eas2tas;
 
-		// use npfg's bearing to commanded course, controlled via yaw angle while on runway
-		const float bearing = _npfg.getBearing();
+		// While the nose wheel is steering on the ground, hold the fixed runway/takeoff line.
+		// NPFG cross-track correction can demand a large sideways bearing after a small drift,
+		// which saturates the wheel during the high-speed ground roll.
+		const float bearing = _runway_takeoff.controlYaw() ? runway_heading_bearing : _npfg.getBearing();
 
 		// heading hold mode will override this bearing setpoint
 		float yaw_body = _runway_takeoff.getYaw(bearing);
@@ -1617,8 +2079,17 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 		_tecs.set_equivalent_airspeed_min(_performance_model.getMinimumCalibratedAirspeed()); // reset after TECS calculation
 
-		const float pitch_body = _runway_takeoff.getPitch(get_tecs_pitch());
+		float pitch_body = _runway_takeoff.getPitch(get_tecs_pitch());
 		_att_sp.thrust_body[0] = _runway_takeoff.getThrottle(_param_fw_thr_idle.get(), get_tecs_thrust());
+
+		if (_control_mode.flag_armed && _runway_takeoff.controlYaw() && hrt_elapsed_time(&_ground_taxi_last_diag) > 2_s) {
+			PX4_INFO("RWTO: yaw %.1f sp %.1f err %.1f gs %.1f eas %.1f state %d wheel %d",
+				 (double)math::degrees(_yaw), (double)math::degrees(yaw_body),
+				 (double)math::degrees(wrap_pi(yaw_body - _yaw)), (double)ground_speed.norm(),
+				 (double)_airspeed_eas, static_cast<int>(_runway_takeoff.getState()),
+				 static_cast<int>(_att_sp.fw_control_yaw_wheel));
+			_ground_taxi_last_diag = hrt_absolute_time();
+		}
 
 		roll_body = constrainRollNearGround(roll_body, _current_altitude, _takeoff_ground_alt);
 
@@ -1665,12 +2136,8 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		float takeoff_bearing = _launch_current_yaw;
 
 		if (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION) {
-			// the bearing from launch to the takeoff waypoint is followed until the clearance altitude is exceeded
-			const Vector2f takeoff_bearing_vector = takeoff_waypoint_local - launch_local_position;
-
-			if (takeoff_bearing_vector.norm() > FLT_EPSILON) {
-				takeoff_bearing = atan2f(takeoff_bearing_vector(1), takeoff_bearing_vector(0));
-			}
+			// A coincident TAKEOFF item falls back to the next mission waypoint.
+			takeoff_bearing = mission_takeoff_bearing(launch_local_position, takeoff_waypoint_local, takeoff_bearing);
 		}
 
 		/* Set control values depending on the detection state */
@@ -2705,6 +3172,8 @@ FixedwingPositionControl::Run()
 			}
 
 		} else {
+			_mission_sub.update(&_mission);
+
 			if (_pos_sp_triplet_sub.update(&_pos_sp_triplet)) {
 
 				_position_setpoint_previous_valid = PX4_ISFINITE(_pos_sp_triplet.previous.lat)
@@ -2770,9 +3239,9 @@ FixedwingPositionControl::Run()
 
 		_att_sp.reset_integral = false;
 
-		// 鸭翼部署判断：跑道起飞达到爬升阶段后偏转2026.5.27修改
+		// V3 canard state machine: deploy at CLIMBOUT and retain the fixed
+		// deflection in normal flight. Types 19/20 remain outside pitch allocation.
 		if (!_canard_deployed && !_canard_retracted && _control_mode.flag_armed) {
-
 			if (_runway_takeoff.isInitialized()
 			    && _runway_takeoff.getState() >= runwaytakeoff::RunwayTakeoffState::CLIMBOUT) {
 				_canard_deployed = true;
@@ -2896,67 +3365,86 @@ FixedwingPositionControl::Run()
 		int8_t old_landing_gear_position = _new_landing_gear_position;
 		_new_landing_gear_position = landing_gear_s::GEAR_KEEP; // is overwritten in Takeoff and Land
 
-		switch (_control_mode_current) {
-		case FW_POSCTRL_MODE_AUTO: {
-				control_auto(control_interval, curr_pos, ground_speed, _pos_sp_triplet.previous, _pos_sp_triplet.current,
-					     _pos_sp_triplet.next);
-				break;
+		const bool run_ground_taxi_test = _param_rwto_taxi_test.get()
+						 && _control_mode.flag_control_auto_enabled
+						 && _control_mode.flag_control_position_enabled;
+
+		if (run_ground_taxi_test) {
+			control_auto_ground_taxi_test(control_interval, ground_speed, _mission);
+
+		} else {
+			if (!_param_rwto_taxi_test.get()) {
+				_ground_taxi_initialized = false;
+				_ground_taxi_warned_no_target = false;
+				_ground_taxi_warned_route_load = false;
+				reset_ground_taxi_route();
+				_ground_taxi_throttle_integrator = 0.f;
+				_ground_taxi_yaw_sp = _yaw;
 			}
 
-		case FW_POSCTRL_MODE_AUTO_ALTITUDE: {
-				control_auto_fixed_bank_alt_hold(control_interval);
-				break;
-			}
+			switch (_control_mode_current) {
+			case FW_POSCTRL_MODE_AUTO: {
+					control_auto(control_interval, curr_pos, ground_speed, _pos_sp_triplet.previous, _pos_sp_triplet.current,
+						     _pos_sp_triplet.next);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_AUTO_CLIMBRATE: {
-				control_auto_descend(control_interval);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_ALTITUDE: {
+					control_auto_fixed_bank_alt_hold(control_interval);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_AUTO_LANDING_STRAIGHT: {
-				control_auto_landing_straight(_local_pos.timestamp, control_interval, ground_speed, _pos_sp_triplet.previous,
-							      _pos_sp_triplet.current);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_CLIMBRATE: {
+					control_auto_descend(control_interval);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_AUTO_LANDING_CIRCULAR: {
-				control_auto_landing_circular(_local_pos.timestamp, control_interval, ground_speed, _pos_sp_triplet.current);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_LANDING_STRAIGHT: {
+					control_auto_landing_straight(_local_pos.timestamp, control_interval, ground_speed, _pos_sp_triplet.previous,
+								      _pos_sp_triplet.current);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_AUTO_PATH: {
-				control_auto_path(control_interval, curr_pos, ground_speed, _pos_sp_triplet.current);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_LANDING_CIRCULAR: {
+					control_auto_landing_circular(_local_pos.timestamp, control_interval, ground_speed, _pos_sp_triplet.current);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_AUTO_TAKEOFF: {
-				control_auto_takeoff(_local_pos.timestamp, control_interval, curr_pos, ground_speed, _pos_sp_triplet.current);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_PATH: {
+					control_auto_path(control_interval, curr_pos, ground_speed, _pos_sp_triplet.current);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_MANUAL_POSITION: {
-				control_manual_position(control_interval, curr_pos, ground_speed);
-				break;
-			}
+			case FW_POSCTRL_MODE_AUTO_TAKEOFF: {
+					control_auto_takeoff(_local_pos.timestamp, control_interval, curr_pos, ground_speed,
+							     _pos_sp_triplet.current, _pos_sp_triplet.next);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_MANUAL_ALTITUDE: {
-				control_manual_altitude(control_interval, curr_pos, ground_speed);
-				break;
-			}
+			case FW_POSCTRL_MODE_MANUAL_POSITION: {
+					control_manual_position(control_interval, curr_pos, ground_speed);
+					break;
+				}
 
-		case FW_POSCTRL_MODE_OTHER: {
-				_att_sp.thrust_body[0] = min(_att_sp.thrust_body[0], _param_fw_thr_max.get());
-				break;
-			}
+			case FW_POSCTRL_MODE_MANUAL_ALTITUDE: {
+					control_manual_altitude(control_interval, curr_pos, ground_speed);
+					break;
+				}
+
+			case FW_POSCTRL_MODE_OTHER: {
+					_att_sp.thrust_body[0] = min(_att_sp.thrust_body[0], _param_fw_thr_max.get());
+					break;
+				}
 
 		case FW_POSCTRL_MODE_TRANSITION_TO_HOVER_LINE_FOLLOW: {
 				control_backtransition_line_follow(ground_speed, _pos_sp_triplet.current);
 				break;
 			}
 
-		case FW_POSCTRL_MODE_TRANSITION_TO_HOVER_HEADING_HOLD: {
-				control_backtransition_heading_hold();
-				break;
+			case FW_POSCTRL_MODE_TRANSITION_TO_HOVER_HEADING_HOLD: {
+					control_backtransition_heading_hold();
+					break;
+				}
 			}
 		}
 
@@ -3058,6 +3546,8 @@ FixedwingPositionControl::reset_takeoff_state()
 	_launch_detected = false;
 
 	_takeoff_ground_alt = _current_altitude;
+	_runway_heading_course_offset = 0.f;
+	_runway_heading_course_offset_valid = false;
 }
 
 void

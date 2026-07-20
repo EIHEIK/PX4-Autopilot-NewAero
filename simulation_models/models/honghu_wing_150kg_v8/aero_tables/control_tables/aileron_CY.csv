@@ -1,0 +1,8 @@
+# Honghu A1 V2.5 aileron local derivative table
+# delta_doc=+10 deg is right roll; negative column derived by symmetry
+# total increment = interpolated derivative * signed delta_a_doc_deg
+alpha_deg/delta_deg,-10,10
+0,0,0
+4,0,0
+8,-0.0003,-0.0003
+12,-0.0007,-0.0007

@@ -82,6 +82,7 @@ FixedwingAttitudeControl::parameters_update()
 	_wheel_ctrl.set_k_ff(_param_fw_wr_ff.get());
 	_wheel_ctrl.set_integrator_max(_param_fw_wr_imax.get());
 	_wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
+	_wheel_ctrl.set_time_constant(_param_fw_w_tc.get());
 }
 
 void
@@ -286,12 +287,17 @@ void FixedwingAttitudeControl::Run()
 			/* Reset integrators if commanded by attitude setpoint, or the aircraft is on ground
 			 * or a multicopter (but not transitioning VTOL or tailsitter)
 			 */
+			const bool reset_for_landed = _landed && !wheel_control;
+
 			if (_att_sp.reset_integral
-			    || _landed
+			    || reset_for_landed
 			    || !_in_fw_or_transition_wo_tailsitter_transition) {
 
 				_rates_sp.reset_integral = true;
-				_wheel_ctrl.reset_integrator();
+
+				if (!wheel_control) {
+					_wheel_ctrl.reset_integrator();
+				}
 
 			} else {
 				_rates_sp.reset_integral = false;
@@ -309,10 +315,14 @@ void FixedwingAttitudeControl::Run()
 					}
 				}
 
-				// Use stall airspeed to calculate ground speed scaling region. Don't scale below gspd_scaling_trim
-				float gspd_scaling_trim = (_param_fw_airspd_stall.get());
+				// A steerable nose wheel becomes much more effective as groundspeed rises. Airframes can
+				// select an earlier scaling threshold than stall speed to avoid excessive steering during
+				// a high-speed ground roll. A negative value preserves the legacy stall-speed behavior.
+				const float configured_scaling_speed = _param_fw_w_gspd_sc.get();
+				const float gspd_scaling_trim = configured_scaling_speed > FLT_EPSILON ?
+						configured_scaling_speed : _param_fw_airspd_stall.get();
 
-				if (_groundspeed > gspd_scaling_trim) {
+				if (gspd_scaling_trim > FLT_EPSILON && _groundspeed > gspd_scaling_trim) {
 					groundspeed_scale = gspd_scaling_trim / _groundspeed;
 
 				}

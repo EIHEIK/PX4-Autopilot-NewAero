@@ -62,6 +62,7 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/rate_ctrl_status.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_rates_setpoint.h>
@@ -104,6 +105,7 @@ private:
 	uORB::Subscription _battery_status_sub{ORB_ID(battery_status)};
 	uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};
 	uORB::Subscription _rates_sp_sub{ORB_ID(vehicle_rates_setpoint)};
+	uORB::Subscription _vehicle_attitude_setpoint_sub{ORB_ID(vehicle_attitude_setpoint)};
 	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
@@ -123,6 +125,7 @@ private:
 
 	manual_control_setpoint_s		_manual_control_setpoint{};
 	vehicle_control_mode_s			_vcontrol_mode{};
+	vehicle_attitude_setpoint_s		_attitude_sp{};
 	vehicle_thrust_setpoint_s		_vehicle_thrust_setpoint{};
 	vehicle_torque_setpoint_s		_vehicle_torque_setpoint{};
 	vehicle_rates_setpoint_s		_rates_sp{};
@@ -182,6 +185,8 @@ private:
 		(ParamFloat<px4::params::FW_MAN_Y_SC>) _param_fw_man_y_sc,
 
 		(ParamFloat<px4::params::FW_PR_FF>) _param_fw_pr_ff,
+		(ParamFloat<px4::params::FW_PR_FF_RWTO>) _param_fw_pr_ff_rwto,
+		(ParamFloat<px4::params::FW_PR_RWTO_Q>) _param_fw_pr_rwto_q,
 		(ParamFloat<px4::params::FW_PR_I>) _param_fw_pr_i,
 		(ParamFloat<px4::params::FW_PR_IMAX>) _param_fw_pr_imax,
 		(ParamFloat<px4::params::FW_PR_P>) _param_fw_pr_p,

@@ -1,0 +1,30 @@
+source:
+  document: /home/fly/px4_reference_docs/current/鸿鹄翼A1样机仿真参数_V2.5(2).pdf
+  version: V2.5(2)
+  convention: PDF/PX4 FRD
+measured_or_supplied:
+  static_aero: tables 4-9
+  dynamic_derivatives: table 10
+  control_derivatives: tables 11-18
+  propulsion: tables 19-22; two negative windmilling points retained as supplied
+derived:
+  alpha_18_20_nonzero_beta: preserve_alpha_16_beta_delta
+  alpha_18_20_lateral: freeze_alpha_16_shape
+  negative_aileron: aircraft_reflection_symmetry
+  fuel_6000m_40mps_20pct: 1.02_kg_h_interpolated_from_16_and_25_pct
+engineering_assumptions:
+  mass_properties: fixed_150kg
+  gear: rigid_wheel_carriers_phase_1; main_wheels_free_spin; nose_wheel_steered_and_free_spin
+  gear_coordinates: PDF_points_converted_to_CG_centered_Gazebo_FLU
+  ground_contact: main_mu_mu2_0.8_2.0; nose_mu_mu2_1.2_3.0; kp_2e6; kd_2e4; max_vel_0.2m_s; min_depth_0.5mm
+  accepted_physics_step: 2ms_500Hz_realtime_baseline; sub_2ms_requires_bridge_capacity_fix_before_convergence_claim
+  takeoff_pitch_control: pitch_sp_limit_8deg; rate_limit_6deg_s; runway_ff_6.6_released_by_q_2deg_s; positive_runway_control_limit_0.35_released_over_accumulated_rotation_2_to_6deg; rate_D_air_0.10; airborne_rate_PID_FF_0.40_0.04_0.10_0.75
+  airborne_lateral_control: roll_rate_PID_FF_0.26_0.05_0.06_1.45; roll_TC_0.65s; rate_limit_20deg_s; roll_limit_30deg; NPFG_20s_damping_0.80_selected_from_clean_15s_20s_QGC_logs
+  route_acceptance: no_foldback_1200m_legs_30deg_course_changes; waypoint_radius_250m_mission_lower_bound; NPFG_switch_multiplier_0.32_validated_line_following_baseline; larger_multiplier_does_not_construct_circular_fillet; takeoff_clearance_40m_plus_PX4_10m_buffer_to_50m_cruise
+  route_acceptance_validation: NPFG_0.90_probe_rejected_after_completed_route_but_large_lateral_transients_and_32.63m_minimum_altitude; exact_early_turn_requires_mission_fillet
+  takeoff_route_geometry: gazebo_and_QGC_planned_home_28.5712315_121.5759172; model_true_heading_24.97deg; production_takeoff_point_1.893km_ahead; coincident_takeoff_direction_rejected_below_50m_and_falls_back_to_next_waypoint
+  takeoff_direction_validation: analysis_outputs/honghu_v8_takeoff_coincident_npfg20_2ms.json; next_waypoint_fallback_PASS; runway_cross_track_max_0.028m; liftoff_44.31m_s; pitch_max_8.26deg
+  production_mission_validation: ULogs_2026-07-16_13_08_15_and_13_32_26; corrected_20_items_start_seq0_reach_land_seq18; NPFG_20_NAV_ACC_250_RWTO_DIR_MIN_50_unchanged; no_dropouts_or_flight_failsafe; runway_xtrack_max_0.455m; roll_tracking_RMS_1.44_1.43deg; touchdown_not_tested
+  suspension: deferred_until_rigid_ground_roll_baseline_is_closed
+  post_stall: viterna_from_positive_20deg_and_derived_negative_12deg
+  beta_outside_table: clamp_to_16deg

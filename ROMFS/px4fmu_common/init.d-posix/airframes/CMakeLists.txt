@@ -93,6 +93,10 @@ px4_add_romfs_files(
 	4020_gz_tiltrotor
 	4021_gz_x500_flow
 	4024_gz_honghu_wing_150kg_v3
+	4025_gz_honghu_wing_150kg_v5
+	4026_gz_honghu_wing_150kg_v6
+	4027_gz_honghu_wing_150kg_v7
+	4028_gz_honghu_wing_150kg_v8
 
 	6011_gazebo-classic_typhoon_h480
 	6011_gazebo-classic_typhoon_h480.post

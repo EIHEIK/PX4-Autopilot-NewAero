@@ -226,6 +226,40 @@ PARAM_DEFINE_FLOAT(FW_RR_FF, 0.5f);
 PARAM_DEFINE_FLOAT(FW_PR_FF, 0.5f);
 
 /**
+ * Runway-rotation pitch breakaway feed forward
+ *
+ * Initial pitch feed-forward used while automatic nose-wheel control is active.
+ * As measured positive pitch rate approaches FW_PR_RWTO_Q, this value is
+ * continuously blended back to FW_PR_FF. A negative value disables the
+ * runway-specific path and preserves legacy behavior.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_FF_RWTO, -1.0f);
+
+/**
+ * Runway-rotation breakaway release rate
+ *
+ * Measured positive pitch rate at which FW_PR_FF_RWTO has been completely
+ * blended back to FW_PR_FF. A low value removes the high nose-wheel
+ * breakaway command as soon as rotation starts, limiting pitch-rate overshoot.
+ * This parameter has no effect while FW_PR_FF_RWTO is negative.
+ *
+ * @unit deg/s
+ * @min 0.1
+ * @max 20.0
+ * @decimal 1
+ * @increment 0.1
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_RWTO_Q, 1.0f);
+
+/**
  * Yaw rate feed forward
  *
  * Direct feed forward from rate setpoint to control surface output

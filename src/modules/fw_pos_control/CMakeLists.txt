@@ -61,5 +61,6 @@ px4_add_module(
 		FixedwingPositionControl.cpp
 		FixedwingPositionControl.hpp
 	DEPENDS
+		dataman_client
 		${POSCONTROL_DEPENDENCIES}
 	)

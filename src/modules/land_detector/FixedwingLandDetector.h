@@ -84,7 +84,10 @@ private:
 		(ParamFloat<px4::params::LNDFW_VEL_XY_MAX>) _param_lndfw_vel_xy_max,
 		(ParamFloat<px4::params::LNDFW_VEL_Z_MAX>)  _param_lndfw_vel_z_max,
 		(ParamFloat<px4::params::LNDFW_ROT_MAX>)    _param_lndfw_rot_max,
-		(ParamFloat<px4::params::LNDFW_TRIG_TIME>)  _param_lndfw_trig_time
+		(ParamFloat<px4::params::LNDFW_TRIG_TIME>)  _param_lndfw_trig_time,
+		(ParamBool<px4::params::RWTO_TKOFF>)        _param_rwto_tkoff,
+		(ParamBool<px4::params::RWTO_TAXI_TEST>)    _param_rwto_taxi_test,
+		(ParamFloat<px4::params::RWTO_ROT_AIRSPD>)  _param_rwto_rot_airspd
 	);
 };
 

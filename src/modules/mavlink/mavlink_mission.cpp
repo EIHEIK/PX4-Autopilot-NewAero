@@ -164,6 +164,13 @@ MavlinkMissionManager::update_active_mission(dm_item_t mission_dataman_id, uint1
 
 	mission_s mission{};
 	mission.timestamp = hrt_absolute_time();
+	// Gazebo lockstep time can still be zero when a persisted mission is
+	// republished during boot. A zero timestamp makes MissionBase reject an
+	// otherwise valid stored mission, so retain zero as the invalid sentinel
+	// and use the first representable timestamp for this early-boot update.
+	if (mission.timestamp == 0) {
+		mission.timestamp = 1;
+	}
 	mission.mission_dataman_id = mission_dataman_id;
 	mission.fence_dataman_id = _fence_dataman_id;
 	mission.safepoint_dataman_id = _safepoint_dataman_id;

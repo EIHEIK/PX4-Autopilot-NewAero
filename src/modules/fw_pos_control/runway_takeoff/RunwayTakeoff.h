@@ -81,11 +81,12 @@ public:
 	 * @param time_now Absolute time since system boot [us]
 	 * @param takeoff_airspeed Calibrated airspeed setpoint for the takeoff climbout [m/s]
 	 * @param calibrated_airspeed Vehicle calibrated airspeed [m/s]
+	 * @param ground_speed Vehicle horizontal ground speed [m/s]
 	 * @param vehicle_altitude Vehicle altitude (AGL) [m]
 	 * @param clearance_altitude Altitude (AGL) above which we have cleared all occlusions in the runway path [m]
 	 */
 	void update(const hrt_abstime &time_now, const float takeoff_airspeed, const float calibrated_airspeed,
-		    const float vehicle_altitude, const float clearance_altitude);
+		    const float ground_speed, const float vehicle_altitude, const float clearance_altitude);
 
 	/**
 	 * @return Current takeoff state
@@ -103,6 +104,12 @@ public:
 	bool runwayTakeoffEnabled() { return param_rwto_tkoff_.get(); }
 
 	/**
+	 * @return Pure ground taxi test mode is enabled. This is intentionally
+	 * separate from normal runway takeoff and must not sequence into rotation.
+	 */
+	bool taxiTestEnabled() const { return param_rwto_taxi_test_.get(); }
+
+	/**
 	 * @return Initial vehicle yaw angle [rad]
 	 */
 	float getInitYaw() { return initial_yaw_; }
@@ -111,6 +118,9 @@ public:
 	 * @return The vehicle should control yaw via rudder or nose gear
 	 */
 	bool controlYaw();
+
+	/** @return Configured AGL height for extended wheel control [m]. */
+	float getWheelControlHeight() const { return param_rwto_wheel_hgt_.get(); }
 
 	/**
 	 * @param external_pitch_setpoint Externally commanded pitch angle setpoint (usually from TECS) [rad]
@@ -219,6 +229,19 @@ private:
 	float initial_yaw_{0.f};
 
 	/**
+	 * Latest calibrated airspeed passed to update(). Used to hold taxi-test speed below the configured limit. [m/s]
+	 */
+	float last_calibrated_airspeed_{0.f};
+
+	/**
+	 * Latest horizontal ground speed passed to update(). Used to avoid taxi-test takeoff detection. [m/s]
+	 */
+	float last_ground_speed_{0.f};
+
+	/** Latest AGL altitude passed to update(), relative to the runway start. [m] */
+	float last_vehicle_altitude_{0.f};
+
+	/**
 	 * The global (lat, lon) position of the vehicle on first pass through the runway takeoff state machine. The
 	 * takeoff path emanates from this point to correct for any GNSS uncertainty from the planned takeoff point. The
 	 * vehicle should accordingly be set on the center of the runway before engaging the mission. [deg]
@@ -231,8 +254,14 @@ private:
 		(ParamFloat<px4::params::RWTO_MAX_THR>) param_rwto_max_thr_,
 		(ParamFloat<px4::params::RWTO_PSP>) param_rwto_psp_,
 		(ParamFloat<px4::params::RWTO_RAMP_TIME>) param_rwto_ramp_time_,
+		(ParamBool<px4::params::RWTO_TAXI_TEST>) param_rwto_taxi_test_,
+		(ParamFloat<px4::params::RWTO_TAXI_THR>) param_rwto_taxi_thr_,
+		(ParamFloat<px4::params::RWTO_TAXI_ARSP>) param_rwto_taxi_arsp_,
+		(ParamFloat<px4::params::RWTO_TAXI_GSPD>) param_rwto_taxi_gspd_,
+		(ParamFloat<px4::params::RWTO_TAXI_TIME>) param_rwto_taxi_time_,
 		(ParamFloat<px4::params::RWTO_ROT_AIRSPD>) param_rwto_rot_airspd_,
-		(ParamFloat<px4::params::RWTO_ROT_TIME>) param_rwto_rot_time_
+		(ParamFloat<px4::params::RWTO_ROT_TIME>) param_rwto_rot_time_,
+		(ParamFloat<px4::params::RWTO_WHEEL_HGT>) param_rwto_wheel_hgt_
 	)
 };
 

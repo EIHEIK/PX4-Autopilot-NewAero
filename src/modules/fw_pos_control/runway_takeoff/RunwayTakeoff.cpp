@@ -62,8 +62,12 @@ void RunwayTakeoff::init(const hrt_abstime &time_now, const float initial_yaw, c
 }
 
 void RunwayTakeoff::update(const hrt_abstime &time_now, const float takeoff_airspeed, const float calibrated_airspeed,
-			   const float vehicle_altitude, const float clearance_altitude)//起飞状态机切换函数
+			   const float ground_speed, const float vehicle_altitude, const float clearance_altitude)//起飞状态机切换函数
 {
+	last_calibrated_airspeed_ = calibrated_airspeed;
+	last_ground_speed_ = ground_speed;
+	last_vehicle_altitude_ = vehicle_altitude;
+
 	switch (takeoff_state_) {
 	case RunwayTakeoffState::THROTTLE_RAMP://当油门达到全油门稳定状态后
 		if ((time_now - time_initialized_) > (param_rwto_ramp_time_.get() * 1_s)) {
@@ -73,8 +77,12 @@ void RunwayTakeoff::update(const hrt_abstime &time_now, const float takeoff_airs
 		break;
 
 	case RunwayTakeoffState::CLAMPED_TO_RUNWAY: {//地面滑跑阶段，轮控主要发挥作用
+			if (taxiTestEnabled()) {
+				break;
+			}
+
 			const float rotation_airspeed = (param_rwto_rot_airspd_.get() > FLT_EPSILON) ? math::min(param_rwto_rot_airspd_.get(),
-							takeoff_airspeed) : 0.9f * takeoff_airspeed;
+						takeoff_airspeed) : 0.9f * takeoff_airspeed;
 
 			if (calibrated_airspeed > rotation_airspeed) {
 				takeoff_time_ = time_now;
@@ -101,8 +109,12 @@ void RunwayTakeoff::update(const hrt_abstime &time_now, const float takeoff_airs
 
 bool RunwayTakeoff::controlYaw()
 {
-	// keep controlling yaw directly until we start navigation
-	return takeoff_state_ < RunwayTakeoffState::CLIMBOUT;
+	// Legacy behavior stops direct yaw control at rotation. Airframes with a
+	// long rotation roll can opt in to keep the wheel active until liftoff.
+	return takeoff_state_ < RunwayTakeoffState::CLIMBOUT
+	       || (takeoff_state_ == RunwayTakeoffState::CLIMBOUT
+	           && param_rwto_wheel_hgt_.get() > FLT_EPSILON
+	           && last_vehicle_altitude_ < param_rwto_wheel_hgt_.get());
 }
 
 float RunwayTakeoff::getPitch(float external_pitch_setpoint)
@@ -126,6 +138,10 @@ float RunwayTakeoff::getRoll(float external_roll_setpoint)
 
 float RunwayTakeoff::getYaw(float external_yaw_setpoint)
 {
+	if (taxiTestEnabled() && takeoff_state_ < RunwayTakeoffState::CLIMBOUT) {
+		return external_yaw_setpoint;
+	}
+
 	if (param_rwto_hdg_.get() == 0 && takeoff_state_ < RunwayTakeoffState::CLIMBOUT) {
 		return initial_yaw_;
 
@@ -137,23 +153,37 @@ float RunwayTakeoff::getYaw(float external_yaw_setpoint)
 float RunwayTakeoff::getThrottle(const float idle_throttle, const float external_throttle_setpoint) const
 {
 	float throttle = idle_throttle;
+	const float ground_roll_throttle = taxiTestEnabled() ? param_rwto_taxi_thr_.get() : param_rwto_max_thr_.get();
+
+	if (taxiTestEnabled()) {
+		const bool taxi_time_expired = (param_rwto_taxi_time_.get() > FLT_EPSILON)
+					       && (hrt_elapsed_time(&time_initialized_) > param_rwto_taxi_time_.get() * 1_s);
+		const bool taxi_airspeed_exceeded = (param_rwto_taxi_arsp_.get() > FLT_EPSILON)
+						  && (last_calibrated_airspeed_ > param_rwto_taxi_arsp_.get());
+		const bool taxi_groundspeed_exceeded = (param_rwto_taxi_gspd_.get() > FLT_EPSILON)
+						     && (last_ground_speed_ > param_rwto_taxi_gspd_.get());
+
+		if (taxi_time_expired || taxi_airspeed_exceeded || taxi_groundspeed_exceeded) {
+			return idle_throttle;
+		}
+	}
 
 	switch (takeoff_state_) {
 	case RunwayTakeoffState::THROTTLE_RAMP:
 
-		throttle = interpolateValuesOverAbsoluteTime(idle_throttle, param_rwto_max_thr_.get(), time_initialized_,
+		throttle = interpolateValuesOverAbsoluteTime(idle_throttle, ground_roll_throttle, time_initialized_,
 				param_rwto_ramp_time_.get());
 
 		break;
 
 	case RunwayTakeoffState::CLAMPED_TO_RUNWAY:
-		throttle = param_rwto_max_thr_.get();
+		throttle = ground_roll_throttle;
 
 		break;
 
 	case RunwayTakeoffState::CLIMBOUT:
 		// ramp in throttle setpoint over takeoff rotation transition time
-		throttle = interpolateValuesOverAbsoluteTime(param_rwto_max_thr_.get(), external_throttle_setpoint, takeoff_time_,
+		throttle = interpolateValuesOverAbsoluteTime(ground_roll_throttle, external_throttle_setpoint, takeoff_time_,
 				param_rwto_rot_time_.get());
 
 		break;
@@ -209,6 +239,8 @@ void RunwayTakeoff::reset()
 	initialized_ = false;
 	takeoff_state_ = RunwayTakeoffState::THROTTLE_RAMP;
 	takeoff_time_ = 0;
+	last_calibrated_airspeed_ = 0.f;
+	last_ground_speed_ = 0.f;
 }
 
 float RunwayTakeoff::interpolateValuesOverAbsoluteTime(const float start_value, const float end_value,

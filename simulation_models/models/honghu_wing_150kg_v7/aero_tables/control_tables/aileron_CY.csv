@@ -1,0 +1,7 @@
+# Honghu A1 Word V2.5 aerodynamic table
+# aileron coefficient increment table from Word delta=+10 right-roll; mirrored about zero
+alpha_deg/delta_deg,-10,0,10
+0,0,0,0
+4,0,0,0
+8,0.0003,0,-0.0003
+12,0.0007,0,-0.0007

@@ -1,0 +1,8 @@
+# Honghu A1 V2.5 local control derivative table
+# alpha and delta in deg; values are coefficient derivative per deg
+# total increment = interpolated derivative * signed delta_doc_deg
+alpha_deg/delta_deg,-4,4,8
+0,0.019,0.017,0.016
+4,0.018,0.013,0.01
+8,0.014,0.005,-0.005
+12,0.012,-0.005,-0.005

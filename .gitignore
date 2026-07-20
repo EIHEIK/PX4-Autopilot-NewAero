@@ -109,3 +109,17 @@ src/systemcmds/topic_listener/listener_generated.cpp
 # colcon
 log/
 keys/
+
+# Honghu local simulation outputs. Keep only the compact, accepted V8
+# baselines needed by the project documentation; raw logs and tuning probes
+# remain local and are intentionally not uploaded to GitHub.
+/analysis_outputs/*
+!/analysis_outputs/honghu_v8_takeoff_final_defaults_2ms.json
+!/analysis_outputs/honghu_v8_route_final_defaults_2ms.json
+!/analysis_outputs/honghu_v8_flight_final_defaults_2ms.json
+!/analysis_outputs/honghu_v8_takeoff_coincident_npfg20_2ms.json
+/tmp/
+/yaw_analysis.png
+/yaw_setpoint_vs_actual.png
+*Zone.Identifier*
+*_Zone.Identifier*

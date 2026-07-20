@@ -63,6 +63,24 @@ PARAM_DEFINE_INT32(RWTO_TKOFF, 0);
 PARAM_DEFINE_INT32(RWTO_HDG, 0);
 
 /**
+ * Minimum distance used to define the mission takeoff direction
+ *
+ * If the distance from the runway start to MAV_CMD_NAV_TAKEOFF is smaller than
+ * this value, the takeoff location is treated as a clearance-altitude marker
+ * rather than a direction point. The direction to the next valid mission
+ * waypoint is used instead, falling back to the airframe heading when no such
+ * waypoint is available. Set to zero to retain the legacy behavior.
+ *
+ * @unit m
+ * @min 0
+ * @max 500
+ * @decimal 1
+ * @increment 1
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_DIR_MIN, 0.0f);
+
+/**
  * Max throttle during runway takeoff.
  *
  * @unit norm
@@ -101,6 +119,216 @@ PARAM_DEFINE_FLOAT(RWTO_PSP, 0.0);
  * @group Runway Takeoff
  */
 PARAM_DEFINE_FLOAT(RWTO_RAMP_TIME, 2.0f);
+
+/**
+ * Ground taxi test mode during runway takeoff
+ *
+ * When enabled, the runway takeoff state machine stays in the ground-roll
+ * phase and does not transition to climbout when rotation airspeed is reached.
+ * This is intended for steerable nose-wheel tuning in simulation. Disable it
+ * for normal takeoff tests.
+ *
+ * @boolean
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_INT32(RWTO_TAXI_TEST, 0);
+
+/**
+ * Legacy taxi-to-takeoff switch
+ *
+ * This parameter is kept for compatibility with older Honghu test logs. Normal
+ * runway takeoff no longer uses RWTO_TAXI_TEST / RWTO_TAXI_TOFF as a staged
+ * taxi-to-takeoff mode. Keep RWTO_TAXI_TEST disabled for formal takeoff tests.
+ *
+ * @boolean
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_INT32(RWTO_TAXI_TOFF, 0);
+
+/**
+ * Throttle used in runway taxi test mode
+ *
+ * This open-loop throttle replaces RWTO_MAX_THR while RWTO_TAXI_TEST is
+ * enabled. Keep it low enough that the aircraft remains on the runway for
+ * nose-wheel steering tuning.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_THR, 0.25f);
+
+/**
+ * Maximum airspeed allowed in runway taxi test mode
+ *
+ * If calibrated airspeed exceeds this value while RWTO_TAXI_TEST is enabled,
+ * the open-loop taxi throttle is reduced to idle. Set to a conservative value
+ * for low-speed ground steering tests.
+ *
+ * @unit m/s
+ * @min 0.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_ARSP, 15.0f);
+
+/**
+ * Maximum ground speed allowed in runway taxi test mode
+ *
+ * If horizontal ground speed exceeds this value while RWTO_TAXI_TEST is
+ * enabled, the open-loop taxi throttle is reduced to idle. This protects
+ * long ground steering tests from being interpreted as takeoff by the fixed
+ * wing land detector.
+ *
+ * @unit m/s
+ * @min 0.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_GSPD, 4.0f);
+
+/**
+ * Target ground speed in runway taxi test mode
+ *
+ * This is the closed-loop ground speed target used only when RWTO_TAXI_TEST is
+ * enabled. It is intentionally independent from takeoff airspeed.
+ *
+ * @unit m/s
+ * @min 0.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_SPD, 10.0f);
+
+/**
+ * Feed-forward throttle in runway taxi test mode
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_THR_FF, 0.22f);
+
+/**
+ * Minimum throttle in runway taxi test mode
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_TMIN, 0.0f);
+
+/**
+ * Maximum throttle in runway taxi test mode
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_TMAX, 0.35f);
+
+/**
+ * Ground speed proportional gain in runway taxi test mode
+ *
+ * @min 0.0
+ * @decimal 3
+ * @increment 0.001
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_SPD_P, 0.025f);
+
+/**
+ * Ground speed integral gain in runway taxi test mode
+ *
+ * @min 0.0
+ * @decimal 4
+ * @increment 0.001
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_SPD_I, 0.003f);
+
+/**
+ * Cross-track heading correction gain in runway taxi test mode
+ *
+ * Converts lateral line error to a small heading correction while taxiing.
+ *
+ * @min 0.0
+ * @decimal 3
+ * @increment 0.001
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_XTK_P, 0.015f);
+
+/**
+ * Acceptance radius for runway taxi mission waypoints
+ *
+ * Used by the independent RWTO_TAXI_TEST route state machine when a mission
+ * item does not define a valid acceptance radius.
+ *
+ * @unit m
+ * @min 1.0
+ * @decimal 1
+ * @increment 1.0
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_ACC, 12.0f);
+
+/**
+ * Maximum cross-track heading correction in runway taxi test mode
+ *
+ * @unit deg
+ * @min 0.0
+ * @max 45.0
+ * @decimal 1
+ * @increment 1.0
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_XMAX, 35.0f);
+
+/**
+ * Maximum yaw setpoint slew rate in runway taxi test mode
+ *
+ * Limits the commanded heading change while taxiing so the nose wheel is not
+ * fed a step change at waypoint transitions.
+ *
+ * @unit deg/s
+ * @min 0.0
+ * @max 90.0
+ * @decimal 1
+ * @increment 1.0
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_YRMAX, 30.0f);
+
+/**
+ * Maximum runway taxi test duration
+ *
+ * If greater than zero, the open-loop taxi throttle is reduced to idle after
+ * this many seconds. The nose-wheel controller remains enabled until the mode
+ * is changed or the vehicle is disarmed.
+ *
+ * @unit s
+ * @min 0.0
+ * @decimal 1
+ * @increment 1.0
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_TAXI_TIME, 0.0f);
 
 /**
  * NPFG period while steering on runway
@@ -153,3 +381,17 @@ PARAM_DEFINE_FLOAT(RWTO_ROT_AIRSPD, -1.0f);
  * @group Runway Takeoff
  */
 PARAM_DEFINE_FLOAT(RWTO_ROT_TIME, 1.0f);
+
+/**
+ * Height to keep nose-wheel yaw control after rotation starts
+ *
+ * A positive value keeps wheel yaw control active through CLIMBOUT until the
+ * vehicle rises above this height. Zero preserves the legacy behavior.
+ *
+ * @unit m
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_WHEEL_HGT, 0.0f);

@@ -65,15 +65,15 @@ public:
 	void reset_integrator() { _integrator = 0.f; }
 
 private:
-	float _tc;
-	float _k_p;
-	float _k_i;
-	float _k_ff;
-	float _integrator_max;
-	float _max_rate;
-	float _last_output;
-	float _integrator;
-	float _body_rate_setpoint;
+	float _tc{1.5f};
+	float _k_p{0.f};
+	float _k_i{0.f};
+	float _k_ff{0.f};
+	float _integrator_max{0.f};
+	float _max_rate{0.f};
+	float _last_output{0.f};
+	float _integrator{0.f};
+	float _body_rate_setpoint{0.f};
 };
 
 #endif // FW_WHEEL_CONTROLLER_H

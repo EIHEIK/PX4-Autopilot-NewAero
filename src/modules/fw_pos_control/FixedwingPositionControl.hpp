@@ -49,6 +49,7 @@
 
 #include "launchdetection/LaunchDetector.h"
 #include "runway_takeoff/RunwayTakeoff.h"
+#include <dataman_client/DatamanClient.hpp>
 #include <lib/fw_performance_model/PerformanceModel.hpp>
 
 #include <float.h>
@@ -76,6 +77,7 @@
 #include <uORB/topics/landing_gear.h>
 #include <uORB/topics/launch_detection_status.h>
 #include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/mission.h>
 #include <uORB/topics/normalized_unsigned_setpoint.h>
 #include <uORB/topics/npfg_status.h>
 #include <uORB/topics/parameter_update.h>
@@ -99,6 +101,8 @@
 #include <uORB/topics/wind.h>
 #include <uORB/topics/orbit_status.h>
 #include <uORB/uORB.h>
+
+#include "../navigator/navigation.h"
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 #include "figure_eight/FigureEight.hpp"
@@ -209,6 +213,7 @@ private:
 	uORB::Subscription _control_mode_sub{ORB_ID(vehicle_control_mode)};
 	uORB::Subscription _global_pos_sub{ORB_ID(vehicle_global_position)};
 	uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};
+	uORB::Subscription _mission_sub{ORB_ID(mission)};
 	uORB::Subscription _pos_sp_triplet_sub{ORB_ID(position_setpoint_triplet)};
 	uORB::Subscription _trajectory_setpoint_sub{ORB_ID(trajectory_setpoint)};
 	uORB::Subscription _vehicle_air_data_sub{ORB_ID(vehicle_air_data)};
@@ -236,6 +241,7 @@ private:
 	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 
 	manual_control_setpoint_s _manual_control_setpoint{};
+	mission_s _mission{};
 	position_setpoint_triplet_s _pos_sp_triplet{};
 	vehicle_attitude_setpoint_s _att_sp{};
 	vehicle_control_mode_s _control_mode{};
@@ -338,6 +344,40 @@ private:
 	RunwayTakeoff _runway_takeoff;
 
 	bool _skipping_takeoff_detection{false};
+
+	// Independent ground taxi test state
+	struct GroundTaxiRoutePoint {
+		Vector2f local_pos{};
+		float acceptance_radius{NAN};
+	};
+
+	static constexpr int GROUND_TAXI_ROUTE_MAX_POINTS = 32;
+	static constexpr hrt_abstime GROUND_TAXI_DATAMAN_LOAD_WAIT{500_ms};
+
+	bool _ground_taxi_initialized{false};
+	bool _ground_taxi_warned_no_target{false};
+	bool _ground_taxi_warned_route_load{false};
+	bool _ground_taxi_route_valid{false};
+	bool _ground_taxi_route_finished{false};
+	hrt_abstime _ground_taxi_time_initialized{0};
+	Vector2f _ground_taxi_start_pos{};
+	GroundTaxiRoutePoint _ground_taxi_route[GROUND_TAXI_ROUTE_MAX_POINTS] {};
+	int _ground_taxi_route_count{0};
+	int _ground_taxi_route_index{0};
+	uint32_t _ground_taxi_loaded_mission_id{0};
+	uint16_t _ground_taxi_loaded_mission_count{0};
+	uint8_t _ground_taxi_loaded_mission_dataman_id{0};
+	uint64_t _ground_taxi_loaded_ref_timestamp{0};
+	double _ground_taxi_loaded_ref_lat{(double)NAN};
+	double _ground_taxi_loaded_ref_lon{(double)NAN};
+	float _ground_taxi_throttle_integrator{0.f};
+	float _ground_taxi_yaw_sp{0.f};
+	float _ground_taxi_heading_course_offset{0.f};
+	bool _ground_taxi_heading_course_offset_valid{false};
+	float _runway_heading_course_offset{0.f};
+	bool _runway_heading_course_offset_valid{false};
+	hrt_abstime _ground_taxi_last_diag{0};
+	DatamanClient _ground_taxi_dataman_client{};
 
 	// AUTO LANDING
 
@@ -596,6 +636,19 @@ private:
 			  const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr, const position_setpoint_s &pos_sp_next);
 
 	/**
+	 * @brief Independent ground taxi test controller.
+	 *
+	 * Uses mission setpoints as ground taxi line references, keeps the aircraft on the ground, and steers with the nose wheel.
+	 */
+	void control_auto_ground_taxi_test(const float control_interval, const Vector2f &ground_speed,
+					   const mission_s &mission);
+	bool update_ground_taxi_route_yaw_sp(const float control_interval, const Vector2f &local_position, float &yaw_body);
+	void update_ground_heading_course_offset(const float control_interval, const Vector2f &ground_speed,
+			float nominal_bearing, bool &offset_valid, float &heading_course_offset);
+	bool update_ground_taxi_route(const mission_s &mission);
+	void reset_ground_taxi_route();
+
+	/**
 	 * @brief Controls altitude and airspeed for a fixed-bank loiter.
 	 *
 	 * Used as a failsafe mode after a lateral position estimate failure.
@@ -670,9 +723,11 @@ private:
 	 * @param global_position Vechile global position [deg]
 	 * @param ground_speed Local 2D ground speed of vehicle [m/s]
 	 * @param pos_sp_curr current position setpoint
+	 * @param pos_sp_next next position setpoint, used as the takeoff direction fallback
 	 */
 	void control_auto_takeoff(const hrt_abstime &now, const float control_interval, const Vector2d &global_position,
-				  const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr);
+				  const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr,
+				  const position_setpoint_s &pos_sp_next);
 
 	/**
 	 * @brief Controls automatic landing with straight approach.
@@ -1066,7 +1121,22 @@ private:
 		(ParamFloat<px4::params::FW_WING_HEIGHT>) _param_fw_wing_height,
 
 		(ParamFloat<px4::params::RWTO_NPFG_PERIOD>) _param_rwto_npfg_period,
+		(ParamFloat<px4::params::RWTO_DIR_MIN>) _param_rwto_dir_min,
 		(ParamBool<px4::params::RWTO_NUDGE>) _param_rwto_nudge,
+		(ParamBool<px4::params::RWTO_TAXI_TEST>) _param_rwto_taxi_test,
+		(ParamFloat<px4::params::RWTO_TAXI_ARSP>) _param_rwto_taxi_arsp,
+		(ParamFloat<px4::params::RWTO_TAXI_GSPD>) _param_rwto_taxi_gspd,
+		(ParamFloat<px4::params::RWTO_TAXI_TIME>) _param_rwto_taxi_time,
+		(ParamFloat<px4::params::RWTO_TAXI_SPD>) _param_rwto_taxi_spd,
+		(ParamFloat<px4::params::RWTO_TAXI_THR_FF>) _param_rwto_taxi_thr_ff,
+		(ParamFloat<px4::params::RWTO_TAXI_TMIN>) _param_rwto_taxi_thr_min,
+		(ParamFloat<px4::params::RWTO_TAXI_TMAX>) _param_rwto_taxi_thr_max,
+		(ParamFloat<px4::params::RWTO_TAXI_SPD_P>) _param_rwto_taxi_spd_p,
+		(ParamFloat<px4::params::RWTO_TAXI_SPD_I>) _param_rwto_taxi_spd_i,
+		(ParamFloat<px4::params::RWTO_TAXI_XTK_P>) _param_rwto_taxi_xtk_p,
+		(ParamFloat<px4::params::RWTO_TAXI_ACC>) _param_rwto_taxi_acc_rad,
+		(ParamFloat<px4::params::RWTO_TAXI_XMAX>) _param_rwto_taxi_xtk_max,
+		(ParamFloat<px4::params::RWTO_TAXI_YRMAX>) _param_rwto_taxi_yrmax,
 
 		(ParamFloat<px4::params::FW_LND_FL_TIME>) _param_fw_lnd_fl_time,
 		(ParamFloat<px4::params::FW_LND_FL_SINK>) _param_fw_lnd_fl_sink,

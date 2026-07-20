@@ -43,6 +43,24 @@
 #include <iostream>
 #include <string>
 
+namespace
+{
+uint64_t sensor_sample_timestamp(const gz::msgs::Header &header, uint64_t fallback)
+{
+	if (header.has_stamp()) {
+		const auto &stamp = header.stamp();
+		const uint64_t candidate = static_cast<uint64_t>(stamp.sec()) * 1'000'000ULL
+					   + static_cast<uint64_t>(stamp.nsec()) / 1'000ULL;
+
+		if (candidate > 0) {
+			return candidate;
+		}
+	}
+
+	return fallback;
+}
+} // namespace
+
 GZBridge::GZBridge(const std::string &world, const std::string &model_name) :
 	ModuleParams(nullptr),
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::rate_ctrl),
@@ -61,10 +79,25 @@ GZBridge::~GZBridge()
 
 int GZBridge::init()
 {
+	// Honghu V8 may run the physics solver at 0.5 ms while its IMU and PX4
+	// control loops run at 250 Hz.  Gazebo publishes world pose on every physics
+	// step; converting and publishing all 2000 messages/s lets Transport build
+	// a growing queue, so PX4 controls an increasingly stale physical state.
+	// Throttle the expensive pose path to the actual control-loop rate.  Clock
+	// decimation is handled deterministically in clockCallback using simulation
+	// time, rather than wall-clock Transport throttling.  Keep legacy models on
+	// the original behavior.
+	gz::transport::SubscribeOptions clock_options;
+	gz::transport::SubscribeOptions pose_options;
+
+	if (_model_name.rfind("honghu_wing_150kg_v8", 0) == 0) {
+		pose_options.SetMsgsPerSec(250);
+	}
+
 	// clock
 	std::string clock_topic = "/world/" + _world_name + "/clock";
 
-	if (!_node.Subscribe(clock_topic, &GZBridge::clockCallback, this)) {
+	if (!_node.Subscribe(clock_topic, &GZBridge::clockCallback, this, clock_options)) {
 		PX4_ERR("failed to subscribe to %s", clock_topic.c_str());
 		return PX4_ERROR;
 	}
@@ -72,7 +105,7 @@ int GZBridge::init()
 	// pose: /world/$WORLD/pose/info
 	std::string world_pose_topic = "/world/" + _world_name + "/pose/info";
 
-	if (!_node.Subscribe(world_pose_topic, &GZBridge::poseInfoCallback, this)) {
+	if (!_node.Subscribe(world_pose_topic, &GZBridge::poseInfoCallback, this, pose_options)) {
 		PX4_ERR("failed to subscribe to %s", world_pose_topic.c_str());
 		return PX4_ERROR;
 	}
@@ -178,7 +211,25 @@ int GZBridge::init()
 
 void GZBridge::clockCallback(const gz::msgs::Clock &msg)
 {
-	// NOTE: PX4-SITL time needs to stay in sync with gz, so this clock-sync will happen on every callback.
+	const uint64_t sim_time_us = static_cast<uint64_t>(msg.sim().sec()) * 1'000'000ULL
+				     + static_cast<uint64_t>(msg.sim().nsec()) / 1'000ULL;
+
+	if (_model_name.rfind("honghu_wing_150kg_v8", 0) == 0) {
+		// px4_clock_settime at every 0.5 ms physics tick is expensive enough to
+		// starve the remaining bridge callbacks.  Decimate on simulation time so
+		// updates remain exactly uniform, unlike wall-clock subscription
+		// throttling, while stale or duplicate clock frames can never move PX4
+		// time backwards.
+		if (sim_time_us <= _clock_timestamp_prev
+		    || (_clock_timestamp_prev != 0 && sim_time_us - _clock_timestamp_prev < 2'000ULL)) {
+			return;
+		}
+
+		_clock_timestamp_prev = sim_time_us;
+	}
+
+	// NOTE: PX4-SITL time needs to stay in sync with gz; legacy models update
+	// on every callback and V8 updates on the uniform interval above.
 	struct timespec ts;
 	ts.tv_sec = msg.sim().sec();
 	ts.tv_nsec = msg.sim().nsec();
@@ -231,6 +282,8 @@ void GZBridge::opticalFlowCallback(const px4::msgs::OpticalFlow &msg)
 void GZBridge::magnetometerCallback(const gz::msgs::Magnetometer &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	device::Device::DeviceId id{};
 	id.devid_s.bus_type = device::Device::DeviceBusType::DeviceBusType_SIMULATION;
@@ -239,8 +292,8 @@ void GZBridge::magnetometerCallback(const gz::msgs::Magnetometer &msg)
 	id.devid_s.address = 3; // TODO: any value other than 3 causes Commander to not use the mag.... wtf
 
 	sensor_mag_s report{};
-	report.timestamp = timestamp;
-	report.timestamp_sample = timestamp;
+	report.timestamp = timestamp_publish;
+	report.timestamp_sample = timestamp_sample;
 	report.device_id = id.devid;
 	report.temperature = this->_temperature;
 
@@ -257,6 +310,8 @@ void GZBridge::magnetometerCallback(const gz::msgs::Magnetometer &msg)
 void GZBridge::barometerCallback(const gz::msgs::FluidPressure &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	device::Device::DeviceId id{};
 	id.devid_s.bus_type = device::Device::DeviceBusType::DeviceBusType_SIMULATION;
@@ -265,8 +320,8 @@ void GZBridge::barometerCallback(const gz::msgs::FluidPressure &msg)
 	id.devid_s.address = 1;
 
 	sensor_baro_s report{};
-	report.timestamp = timestamp;
-	report.timestamp_sample = timestamp;
+	report.timestamp = timestamp_publish;
+	report.timestamp_sample = timestamp_sample;
 	report.device_id = id.devid;
 	report.pressure = msg.pressure();
 	report.temperature = this->_temperature;
@@ -277,6 +332,8 @@ void GZBridge::barometerCallback(const gz::msgs::FluidPressure &msg)
 void GZBridge::airspeedCallback(const gz::msgs::AirSpeed &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	device::Device::DeviceId id{};
 	id.devid_s.bus_type = device::Device::DeviceBusType::DeviceBusType_SIMULATION;
@@ -285,8 +342,8 @@ void GZBridge::airspeedCallback(const gz::msgs::AirSpeed &msg)
 	id.devid_s.address = 1;
 
 	differential_pressure_s report{};
-	report.timestamp = timestamp;
-	report.timestamp_sample = timestamp;
+	report.timestamp = timestamp_publish;
+	report.timestamp_sample = timestamp_sample;
 	report.device_id = id.devid;
 	report.differential_pressure_pa = msg.diff_pressure(); // hPa to Pa;
 	report.temperature = static_cast<float>(msg.temperature()) + atmosphere::kAbsoluteNullCelsius; // K to C
@@ -298,6 +355,8 @@ void GZBridge::airspeedCallback(const gz::msgs::AirSpeed &msg)
 void GZBridge::imuCallback(const gz::msgs::IMU &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	// FLU -> FRD
 	static const auto q_FLU_to_FRD = gz::math::Quaterniond(0, 1, 0, 0);
@@ -316,8 +375,8 @@ void GZBridge::imuCallback(const gz::msgs::IMU &msg)
 	// publish accel
 	sensor_accel_s accel{};
 
-	accel.timestamp_sample = timestamp;
-	accel.timestamp = timestamp;
+	accel.timestamp_sample = timestamp_sample;
+	accel.timestamp = timestamp_publish;
 	accel.device_id = id.devid;
 
 	accel.x = accel_b.X();
@@ -334,8 +393,8 @@ void GZBridge::imuCallback(const gz::msgs::IMU &msg)
 
 	// publish gyro
 	sensor_gyro_s gyro{};
-	gyro.timestamp_sample = timestamp;
-	gyro.timestamp = timestamp;
+	gyro.timestamp_sample = timestamp_sample;
+	gyro.timestamp = timestamp_publish;
 	gyro.device_id = id.devid;
 	gyro.x = gyro_b.X();
 	gyro.y = gyro_b.Y();
@@ -348,12 +407,14 @@ void GZBridge::imuCallback(const gz::msgs::IMU &msg)
 void GZBridge::poseInfoCallback(const gz::msgs::Pose_V &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	for (int p = 0; p < msg.pose_size(); p++) {
 		if (msg.pose(p).name() == _model_name) {
 
-			const double dt = math::constrain((timestamp - _timestamp_prev) * 1e-6, 0.001, 0.1);
-			_timestamp_prev = timestamp;
+			const double dt = math::constrain((timestamp_sample - _timestamp_prev) * 1e-6, 0.001, 0.1);
+			_timestamp_prev = timestamp_sample;
 
 			gz::msgs::Vector3d pose_position = msg.pose(p).position();
 			gz::msgs::Quaternion pose_orientation = msg.pose(p).orientation();
@@ -370,27 +431,27 @@ void GZBridge::poseInfoCallback(const gz::msgs::Pose_V &msg)
 
 			// publish attitude groundtruth
 			vehicle_attitude_s vehicle_attitude_groundtruth{};
-			vehicle_attitude_groundtruth.timestamp_sample = timestamp;
+			vehicle_attitude_groundtruth.timestamp_sample = timestamp_sample;
 			vehicle_attitude_groundtruth.q[0] = q_nb.W();
 			vehicle_attitude_groundtruth.q[1] = q_nb.X();
 			vehicle_attitude_groundtruth.q[2] = q_nb.Y();
 			vehicle_attitude_groundtruth.q[3] = q_nb.Z();
-			vehicle_attitude_groundtruth.timestamp = timestamp;
+			vehicle_attitude_groundtruth.timestamp = timestamp_publish;
 			_attitude_ground_truth_pub.publish(vehicle_attitude_groundtruth);
 
 			// publish angular velocity groundtruth
 			const matrix::Eulerf euler{matrix::Quatf(vehicle_attitude_groundtruth.q)};
 			vehicle_angular_velocity_s vehicle_angular_velocity_groundtruth{};
-			vehicle_angular_velocity_groundtruth.timestamp_sample = timestamp;
+			vehicle_angular_velocity_groundtruth.timestamp_sample = timestamp_sample;
 			const matrix::Vector3f angular_velocity = (euler - _euler_prev) / dt;
 			_euler_prev = euler;
 			angular_velocity.copyTo(vehicle_angular_velocity_groundtruth.xyz);
 
-			vehicle_angular_velocity_groundtruth.timestamp = timestamp;
+			vehicle_angular_velocity_groundtruth.timestamp = timestamp_publish;
 			_angular_velocity_ground_truth_pub.publish(vehicle_angular_velocity_groundtruth);
 
 			vehicle_local_position_s local_position_groundtruth{};
-			local_position_groundtruth.timestamp_sample = timestamp;
+			local_position_groundtruth.timestamp_sample = timestamp_sample;
 			// position ENU -> NED
 			const matrix::Vector3d position{pose_position.y(), pose_position.x(), -pose_position.z()};
 			const matrix::Vector3d velocity{(position - _position_prev) / dt};
@@ -429,7 +490,7 @@ void GZBridge::poseInfoCallback(const gz::msgs::Pose_V &msg)
 				local_position_groundtruth.z_global = false;
 			}
 
-			local_position_groundtruth.timestamp = timestamp;
+			local_position_groundtruth.timestamp = timestamp_publish;
 			_lpos_ground_truth_pub.publish(local_position_groundtruth);
 			return;
 		}
@@ -562,6 +623,8 @@ void GZBridge::addGpsNoise(double &latitude, double &longitude, double &altitude
 void GZBridge::navSatCallback(const gz::msgs::NavSat &msg)
 {
 	const uint64_t timestamp = hrt_absolute_time();
+	const uint64_t timestamp_sample = sensor_sample_timestamp(msg.header(), timestamp);
+	const uint64_t timestamp_publish = timestamp_sample > timestamp ? timestamp_sample : timestamp;
 
 	// initialize gps position
 	if (!_pos_ref.isInitialized()) {
@@ -580,8 +643,8 @@ void GZBridge::navSatCallback(const gz::msgs::NavSat &msg)
 	vehicle_global_position_s gps_truth{};
 
 	// Publish GPS groundtruth
-	gps_truth.timestamp = timestamp;
-	gps_truth.timestamp_sample = timestamp;
+	gps_truth.timestamp = timestamp_publish;
+	gps_truth.timestamp_sample = timestamp_sample;
 	gps_truth.lat = latitude;
 	gps_truth.lon = longitude;
 	gps_truth.alt = altitude;
@@ -620,8 +683,8 @@ void GZBridge::navSatCallback(const gz::msgs::NavSat &msg)
 		sensor_gps.vdop = 100.f;
 	}
 
-	sensor_gps.timestamp = timestamp;
-	sensor_gps.timestamp_sample = timestamp;
+	sensor_gps.timestamp = timestamp_publish;
+	sensor_gps.timestamp_sample = timestamp_sample;
 	sensor_gps.time_utc_usec = 0;
 	sensor_gps.device_id = id.devid;
 	sensor_gps.latitude_deg = latitude;

@@ -81,6 +81,9 @@ private:
 	MixingOutput _mixing_output{"SIM_GZ_EC", MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
 
 	gz::transport::Node::Publisher _actuators_pub;
+	// Model-scoped mirror for custom systems. The legacy root topic remains
+	// authoritative for the standard Gazebo motor plugins.
+	gz::transport::Node::Publisher _actuators_model_pub;
 
 	uORB::Publication<esc_status_s> _esc_status_pub{ORB_ID(esc_status)};
 

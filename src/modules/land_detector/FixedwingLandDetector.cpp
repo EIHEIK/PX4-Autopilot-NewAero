@@ -53,6 +53,29 @@ FixedwingLandDetector::FixedwingLandDetector()
 
 bool FixedwingLandDetector::_get_landed_state()
 {
+	if (_param_rwto_taxi_test.get()) {
+		return true;
+	}
+
+	const bool runway_takeoff_ground_roll = _landed_hysteresis.get_state()
+						&& _param_rwto_tkoff.get()
+						&& _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED
+						&& (_vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION
+						    || _vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_TAKEOFF);
+
+	if (runway_takeoff_ground_roll) {
+		airspeed_validated_s takeoff_airspeed{};
+		_airspeed_validated_sub.copy(&takeoff_airspeed);
+		const float rotation_airspeed = (_param_rwto_rot_airspd.get() > FLT_EPSILON) ? _param_rwto_rot_airspd.get() : 0.f;
+
+		if (rotation_airspeed > FLT_EPSILON
+		    && (!PX4_ISFINITE(takeoff_airspeed.true_airspeed_m_s)
+			|| hrt_elapsed_time(&takeoff_airspeed.timestamp) > 1_s
+			|| takeoff_airspeed.true_airspeed_m_s < rotation_airspeed)) {
+			return true;
+		}
+	}
+
 	// Only trigger flight conditions if we are armed.
 	if (!_armed) {
 		return true;

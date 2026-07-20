@@ -53,6 +53,16 @@ bool GZMixingInterfaceESC::init(const std::string &model_name)
 		return false;
 	}
 
+	// Model-scoped topics use the same convention as the servo bridge and are
+	// reliably discovered by custom systems hosted in the Gazebo server.
+	const std::string model_actuator_topic = "/model/" + model_name + "/honghu_v8/motor_command";
+	_actuators_model_pub = _node.Advertise<gz::msgs::Actuators>(model_actuator_topic);
+
+	if (!_actuators_model_pub.Valid()) {
+		PX4_ERR("failed to advertise %s", model_actuator_topic.c_str());
+		return false;
+	}
+
 	_esc_status_pub.advertise();
 
 	pthread_mutex_init(&_node_mutex, nullptr);
@@ -84,9 +94,17 @@ bool GZMixingInterfaceESC::updateOutputs(bool stop_motors, uint16_t outputs[MAX_
 			rotor_velocity_message.set_velocity(i, outputs[i]);
 		}
 
+		bool published = false;
+
 		if (_actuators_pub.Valid()) {
-			return _actuators_pub.Publish(rotor_velocity_message);
+			published = _actuators_pub.Publish(rotor_velocity_message) || published;
 		}
+
+		if (_actuators_model_pub.Valid()) {
+			published = _actuators_model_pub.Publish(rotor_velocity_message) || published;
+		}
+
+		return published;
 	}
 
 	return false;

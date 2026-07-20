@@ -130,6 +130,37 @@ PARAM_DEFINE_FLOAT(FW_Y_RMAX, 50.0f);
 PARAM_DEFINE_INT32(FW_W_EN, 0);
 
 /**
+ * Wheel steering groundspeed scaling threshold
+ *
+ * Above this groundspeed the wheel steering output is progressively reduced.
+ * Set to a negative value to retain the legacy behavior that uses
+ * FW_AIRSPD_STALL as the scaling threshold.
+ *
+ * @unit m/s
+ * @min -1.0
+ * @max 50.0
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_W_GSPD_SC, -1.0f);
+
+/**
+ * Wheel steering heading time constant
+ *
+ * Converts heading error into a yaw-rate setpoint. Smaller values track the
+ * requested ground heading more quickly.
+ *
+ * @unit s
+ * @min 0.2
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_W_TC, 1.5f);
+
+/**
  * Wheel steering rate proportional gain
  *
  * This defines how much the wheel steering input will be commanded depending on the

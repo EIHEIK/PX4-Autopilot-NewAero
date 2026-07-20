@@ -1,0 +1,958 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.5">
+  <!--
+    Honghu Wing 150kg V3 Gazebo 模型说明：
+    - 该模型用于 PX4 SITL + Gazebo GZ 固定翼仿真。
+    - 几何外形来自鸿鹄翼模型，质量/惯量/气动参考点按 150kg 载货状态调试。
+    - 坐标约定：机体 x 轴朝机头，y 轴朝左/右侧按 SDF link 定义，z 轴向上。
+    - PX4 侧 airframe 为 4024_gz_honghu_wing_150kg_v3，闭环控制 servo_0~servo_7（含鸭翼 servo_6/servo_7）。
+  -->
+  <model name="honghu_wing_150kg_v5">
+    <!-- 初始生成位姿：z=0.6m，避免模型出生时插入地面。最后三个角为 roll/pitch/yaw。 -->
+    <pose>0 0 0.6 0 0 0</pose>
+    <!--
+      base_link：整机主刚体。
+      150kg 载货状态的主要质量和惯量集中在这里；其他舵面 link 只保留较小局部质量。
+    -->
+    <link name="base_link">
+      <!-- base_link 相对模型原点的偏置，用来对齐旧模型 mesh 坐标。 -->
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <!-- 整机主质量/惯量：这里是动力学最敏感参数，修改前应核对文档。 -->
+      <inertial>
+        <!-- 惯性参考点相对 base_link 的偏置，用于让总 CG 接近目标位置。 -->
+        <pose>0.040642364 0 0 0 0 0</pose>
+        <mass>149.714370797</mass>
+        <inertia>
+          <ixx>25.86</ixx>
+          <ixy>-0.017</ixy>
+          <ixz>-3.52</ixz>
+          <iyy>39.14</iyy>
+          <iyz>-0.0019</iyz>
+          <izz>59.12</izz>
+        </inertia>
+      </inertial>
+      <!-- 机身简化碰撞体：主要影响地面接触和滑跑摩擦，不代表真实外形。 -->
+      <collision name="base_link_collision">
+        <pose>0.3 0 -0.45 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>1.3 1.0 0.1</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode>
+              <max_vel>0.3</max_vel>
+              <min_depth>0.002</min_depth>
+            </ode>
+          </contact>
+          <friction>
+            <ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>0.05</mu>
+              <mu2>0.4</mu2>
+              <slip1>0.3</slip1>
+              <slip2>0.05</slip2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <!-- 机身可视网格：只负责显示，不参与气动或质量计算。 -->
+      <visual name="base_link_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/body.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>.175 .175 .175 1.0</ambient>
+          <diffuse>.175 .175 .175 1.0</diffuse>
+        </material>
+      </visual>
+      <gravity>1</gravity>
+      <velocity_decay />
+      <self_collide>0</self_collide>
+      <!-- IMU 仿真传感器：PX4 EKF 姿态估计依赖此数据，update_rate 与噪声会影响估计稳定性。 -->
+      <sensor name="imu_sensor" type="imu">
+        <always_on>1</always_on>
+        <update_rate>250</update_rate>
+        <imu>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>1e-5</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>1e-5</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>1e-5</stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>5e-5</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>5e-5</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>5e-5</stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+      <!-- 气压计仿真传感器：用于高度估计。 -->
+      <sensor name="air_pressure_sensor" type="air_pressure">
+        <always_on>1</always_on>
+        <update_rate>50</update_rate>
+        <air_pressure>
+          <pressure>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </pressure>
+        </air_pressure>
+      </sensor>
+      <!-- 磁力计仿真传感器：用于航向估计。 -->
+      <sensor name="magnetometer_sensor" type="magnetometer">
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+        <magnetometer>
+          <x>
+            <noise type="gaussian">
+              <stddev>0.0001</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <stddev>0.0001</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <stddev>0.0001</stddev>
+            </noise>
+          </z>
+        </magnetometer>
+      </sensor>
+      <!-- GPS/NavSat 仿真传感器：用于位置与航线任务。 -->
+      <sensor name="navsat_sensor" type="navsat">
+        <always_on>1</always_on>
+        <update_rate>30</update_rate>
+      </sensor>
+      <!-- 左主起落架接触体：
+           根据实际 left_backwheel.dae 网格，主轮中心约在模型坐标 x=-1.861, y=+0.524。
+           换算到 base_link 局部坐标约为 x=-0.261, y=+0.524。
+           主轮需要位于 CG 后方但不能太远，否则起飞滑跑时鼻轮载荷过大、飞机难以抬头。 -->
+      <collision name="left_main_runway_skid">
+        <pose>-0.26 0.52 -0.56 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.26 0.10 0.12</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode>
+              <max_vel>10</max_vel>
+              <min_depth>0.005</min_depth>
+            </ode>
+          </contact>
+          <friction>
+            <ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>0.02</mu>
+              <mu2>0.25</mu2>
+              <slip1>0.6</slip1>
+              <slip2>0.05</slip2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <!-- 右主起落架接触体：与左主起落架对称，模拟前三点起落架的左右主轮。 -->
+      <collision name="right_main_runway_skid">
+        <pose>-0.26 -0.52 -0.56 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.26 0.10 0.12</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode>
+              <max_vel>10</max_vel>
+              <min_depth>0.005</min_depth>
+            </ode>
+          </contact>
+          <friction>
+            <ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>0.02</mu>
+              <mu2>0.25</mu2>
+              <slip1>0.6</slip1>
+              <slip2>0.05</slip2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <!-- 前起落架/鼻轮接触体：
+           根据 steeringwheel.dae 网格，前轮中心约在模型坐标 x=-0.645, y=0。
+           换算到 base_link 局部坐标约为 x=+0.955。
+           之前 x=0.55 太靠近 CG，会让鼻轮承担过多重量；前移后更符合前三点起落架。 -->
+      <collision name="nose_runway_skid">
+        <pose>0.95 0 -0.56 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.22 0.12 0.12</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode>
+              <max_vel>10</max_vel>
+              <min_depth>0.005</min_depth>
+            </ode>
+          </contact>
+          <friction>
+            <ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>0.02</mu>
+              <mu2>0.25</mu2>
+              <slip1>0.6</slip1>
+              <slip2>0.05</slip2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </link>
+    <!--
+      rotor_puller：尾推螺旋桨 link。
+      名字沿用模板中的 puller，但该模型按尾推处理；推力线由 link pose 和 motor 插件共同决定。
+    -->
+    <link name="rotor_puller">
+      <!-- 尾推位置与安装角：pitch 约 1.51844rad，用于实现指向机头并带上仰分量的推力线。 -->
+      <pose>-2.8 0 0.12 0 1.51844 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.0456292027</mass>
+        <inertia>
+          <ixx>0.00106772334</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.182516811</iyy>
+          <iyz>0</iyz>
+          <izz>0.182516811</izz>
+        </inertia>
+      </inertial>
+      <collision name="rotor_puller_collision">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.01</length>
+            <radius>0.2</radius>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode />
+          </contact>
+          <friction>
+            <ode />
+          </friction>
+        </surface>
+      </collision>
+      <!-- 螺旋桨可视网格：显示旋翼，不决定推力量级。 -->
+      <visual name="rotor_puller_visual">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>0.33 0.33 0.33</scale>
+            <uri>meshes/propeller_ccw.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+      <gravity>1</gravity>
+      <velocity_decay />
+      <self_collide>0</self_collide>
+    </link>
+    <!-- 螺旋桨转轴关节：motor 插件通过该关节施加转速/推力。 -->
+    <joint name="rotor_puller_joint" type="revolute">
+      <child>rotor_puller</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit>
+          <lower>-1e+16</lower>
+          <upper>1e+16</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+        <use_parent_model_frame>1</use_parent_model_frame>
+      </axis>
+    </joint>
+    <!-- 左副翼 link：几何/质量独立，实际转动由 servo_0 关节驱动。 -->
+    <link name="left_aileron">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.020</mass>
+        <pose>-0.01014 1.881 0.31284 0.00 0 0.0</pose>
+        <inertia>
+          <ixx>2.87e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.62e-5</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>4.44e-5</izz>
+        </inertia>
+      </inertial>
+      <visual name="left_aileron_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/left_aileron.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 右副翼 link：实际转动由 servo_1 关节驱动。 -->
+    <link name="right_aileron">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.020</mass>
+        <pose>-0.01014 -1.881 0.31284 0 0 0</pose>
+        <inertia>
+          <ixx>2.87e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.62e-5</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>4.44e-5</izz>
+        </inertia>
+      </inertial>
+      <visual name="right_aileron_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/right_aileron.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 左升降舵 link：实际转动由 servo_2 关节驱动。 -->
+    <link name="left_elevator">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.020</mass>
+        <pose>-0.7665   0.39402  0.41184 0 0 0</pose>
+        <inertia>
+          <ixx>3.07e-6</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.27e-4</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>1.29e-4</izz>
+        </inertia>
+      </inertial>
+      <visual name="left_elevator_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/left_elevator.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 右升降舵 link：实际转动由 servo_3 关节驱动。 -->
+    <link name="right_elevator">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.020</mass>
+        <pose>-0.7665   -0.39402  0.41184 0 0 0</pose>
+        <inertia>
+          <ixx>3.07e-6</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.27e-4</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>1.29e-4</izz>
+        </inertia>
+      </inertial>
+      <visual name="right_elevator_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/right_elevator.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 左方向舵 link：实际转动由 servo_4 关节驱动。 -->
+    <link name="left_rudder">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.010</mass>
+        <pose>-0.89916  1.4058   0.1089 0 0 0</pose>
+        <inertia>
+          <ixx>2.06e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.77e-5</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>3.02e-6</izz>
+        </inertia>
+      </inertial>
+      <visual name="left_rudder_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/left_rudder.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 右方向舵 link：实际转动由 servo_5 关节驱动。 -->
+    <link name="right_rudder">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.010</mass>
+        <pose>-0.89916  -1.4058   0.1089 0 0 0</pose>
+        <inertia>
+          <ixx>2.06e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.77e-5</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>3.02e-6</izz>
+        </inertia>
+      </inertial>
+      <visual name="right_rudder_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/right_rudder.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 左鸭翼 link：由 PX4 canard_setpoint 控制，偏转范围 +15° ~ -50°。 -->
+    <link name="left_canard">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.070</mass>
+        <pose>1.30854 0.40788 0.03366 0 0 0</pose>
+        <inertia>
+          <ixx>2.97e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.31e-4</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>1.57e-4</izz>
+        </inertia>
+      </inertial>
+      <visual name="left_canard_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/left_canard.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- 右鸭翼 link：由 PX4 canard_setpoint 控制，偏转范围 +15° ~ -50°。 -->
+    <link name="right_canard">
+      <pose>-1.6002 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.070</mass>
+        <pose>1.30854 -0.40788 0.03366 0 0 0</pose>
+        <inertia>
+          <ixx>2.97e-5</ixx>
+          <ixy>0.0</ixy>
+          <iyy>1.31e-4</iyy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+          <izz>1.57e-4</izz>
+        </inertia>
+      </inertial>
+      <visual name="right_canard_visual">
+        <pose>1.6002 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>meshes/right_canard.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8 0.05 0.05 1.0</ambient>
+          <diffuse>0.8 0.05 0.05 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    <!-- servo_0：左副翼铰链。limit 为最大偏转范围，axis 指定转轴方向。 -->
+    <joint name="servo_0" type="revolute">
+      <parent>base_link</parent>
+      <child>left_aileron</child>
+      <pose>-0.01014 1.881 0.31284 0 0 -0.5788</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- servo_1：右副翼铰链。与左副翼配合产生滚转力矩。 -->
+    <joint name="servo_1" type="revolute">
+      <parent>base_link</parent>
+      <child>right_aileron</child>
+      <pose>-0.01014 -1.881 0.31284 0 0 0.5792</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- servo_2：左升降舵铰链。与右升降舵同向用于俯仰控制。 -->
+    <joint name="servo_2" type="revolute">
+      <parent>base_link</parent>
+      <child>left_elevator</child>
+      <pose>-0.7065   0.39402  0.41184 -0.07 0 0</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- servo_3：右升降舵铰链。 -->
+    <joint name="servo_3" type="revolute">
+      <parent>base_link</parent>
+      <child>right_elevator</child>
+      <pose>-0.7065   -0.39402  0.41184 0.07 0 0</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- servo_4：左方向舵铰链，axis 为 z 轴转动。 -->
+    <joint name="servo_4" type="revolute">
+      <parent>base_link</parent>
+      <child>left_rudder</child>
+      <pose>-0.81916  1.4058   0.1089 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- servo_5：右方向舵铰链。 -->
+    <joint name="servo_5" type="revolute">
+      <parent>base_link</parent>
+      <child>right_rudder</child>
+      <pose>-0.81916  -1.4058   0.1089 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>0.78</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- 鸭翼关节：servo_6 = 左鸭翼。偏转范围 +15°(后缘下偏) ~ -50°(气动刹车)，由 PX4 canard_setpoint 闭环控制。 -->
+    <joint name="servo_6" type="revolute">
+      <parent>base_link</parent>
+      <child>left_canard</child>
+      <pose>1.30854 0.40788 0.03366 0.096 0 -0.368</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.872665</lower>
+          <upper>0.261799</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <!-- 鸭翼关节：servo_7 = 右鸭翼。偏转范围 +15°(后缘下偏) ~ -50°(气动刹车)，由 PX4 canard_setpoint 闭环控制。 -->
+    <joint name="servo_7" type="revolute">
+      <parent>base_link</parent>
+      <child>right_canard</child>
+      <pose>1.30854 -0.40788 0.03366 -0.096 0 0.368</pose>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-0.872665</lower>
+          <upper>0.261799</upper>
+        </limit>
+        <dynamics>
+          <damping>1.000</damping>
+        </dynamics>
+      </axis>
+      <physics>
+        <ode>
+          <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+      </physics>
+    </joint>
+    <static>0</static>
+    <!-- Gazebo 舵机关节位置控制器：servo_0~7 接 PX4 输出，p_gain=10。 -->
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_0</joint_name>
+      <sub_topic>servo_0</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_1</joint_name>
+      <sub_topic>servo_1</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_2</joint_name>
+      <sub_topic>servo_2</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_3</joint_name>
+      <sub_topic>servo_3</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_4</joint_name>
+      <sub_topic>servo_4</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_5</joint_name>
+      <sub_topic>servo_5</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_6</joint_name>
+      <sub_topic>servo_6</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>servo_7</joint_name>
+      <sub_topic>servo_7</sub_topic>
+      <p_gain>10</p_gain>
+      <i_gain>0</i_gain>
+      <d_gain>0</d_gain>
+    </plugin>
+    <!-- 气动力参考点 link：AdvancedLiftDrag 的力/矩作用参考，位置按文档设置在 x=-1.57m。 -->
+    <link name="ac">
+      <pose>-1.57 0 0 0 0 0</pose>
+    </link>
+    <joint name="ac_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>ac</child>
+    </joint>
+    <!--
+      HonghuAeroTable 查表气动模型：
+      - 主体系数 CL/CD/CY/Cm/Cl/Cn 来自 Word 参数表导出的二维 CSV。
+      - 舵面线性舵效、动力系统和 PX4 接线第一阶段沿用 v3。
+      - alpha/beta 查表单位为 deg，插件内部从仿真速度计算后转换。
+    -->
+    <plugin filename="libHonghuAeroTable.so" name="custom::HonghuAeroTable">
+      <link_name>ac</link_name>
+      <table_directory>model://honghu_wing_150kg_v5/aero_tables</table_directory>
+      <publish_forces>true</publish_forces>
+      <debug>true</debug>
+      <debug_rate_hz>2</debug_rate_hz>
+      <!--
+        气动力六分量 CSV 记录：文件默认写到 PX4 SITL rootfs 当前工作目录。
+        输出包含机体系/世界系力、机体系/世界系力矩、CL/CD/CY/Cl/Cm/Cn 和各舵面角，
+        用于和 Word 气动表离线复算结果对比。
+      -->
+      <force_log>true</force_log>
+      <force_log_rate_hz>20</force_log_rate_hz>
+      <force_log_path>/home/fly/PX4-Autopilot-canard-2026.6.2/build/px4_sitl_default/rootfs/honghu_v5_aero_forces.csv</force_log_path>
+
+      <!-- Word 文档参考量：S=2.42 m^2, b=3.96 m, c=0.62 m。 -->
+      <area>2.42</area>
+      <span>3.96</span>
+      <mac>0.62</mac>
+      <air_density>1.225</air_density>
+      <cp>0 0 0</cp>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+
+      <!-- Word 文档典型动导数。 -->
+      <CLq>5.62</CLq>
+      <Cmq>-7.00</Cmq>
+      <Clp>-0.33</Clp>
+      <Cnp>-0.05</Cnp>
+      <CYp>-0.15</CYp>
+      <Cnr>-0.08</Cnr>
+      <Clr>0.10</Clr>
+      <CYr>0.34</CYr>
+      <Cma>-0.33</Cma>
+      <Cnb>0.14</Cnb>
+
+      <!-- 控制面数量需与下方 control_surface 块数量一致。 -->
+      <num_ctrl_surfaces>8</num_ctrl_surfaces>
+      <!-- servo_0：左副翼，主要产生滚转力矩 Cl_ctrl；由 PX4 Servo 1 / CA_SV_CS0 控制。 -->
+      <control_surface>
+        <name>servo_0</name>
+        <index>0</index>
+        <direction>1</direction>
+        <CD_ctrl>0</CD_ctrl>
+        <CY_ctrl>5.764e-4</CY_ctrl>
+        <CL_ctrl>0</CL_ctrl>
+        <Cl_ctrl>-0.00135</Cl_ctrl>
+        <Cm_ctrl>0.0</Cm_ctrl>
+        <Cn_ctrl>-0.00</Cn_ctrl>
+      </control_surface>
+      <!-- servo_1：右副翼，滚转方向与左副翼相反；由 PX4 Servo 2 / CA_SV_CS1 控制。 -->
+      <control_surface>
+        <name>servo_1</name>
+        <index>1</index>
+        <direction>1</direction>
+        <CD_ctrl>0</CD_ctrl>
+        <CY_ctrl>-5.764e-4</CY_ctrl>
+        <CL_ctrl>0</CL_ctrl>
+        <Cl_ctrl>0.00135</Cl_ctrl>
+        <Cm_ctrl>0.0</Cm_ctrl>
+        <Cn_ctrl>0.00</Cn_ctrl>
+      </control_surface>
+      <!-- servo_2：左升降舵，主要影响升力 CL_ctrl 和俯仰力矩 Cm_ctrl；由 PX4 Servo 3 / CA_SV_CS2 控制。 -->
+      <control_surface>
+        <name>servo_2</name>
+        <index>2</index>
+        <direction>-1</direction>
+        <CD_ctrl>4.68e-5</CD_ctrl>
+        <CY_ctrl>0</CY_ctrl>
+        <CL_ctrl>0.0075</CL_ctrl>
+        <Cl_ctrl>0.0</Cl_ctrl>
+        <Cm_ctrl>-0.023</Cm_ctrl>
+        <Cn_ctrl>0.0</Cn_ctrl>
+      </control_surface>
+      <!-- servo_3：右升降舵，与左升降舵同向用于俯仰控制；由 PX4 Servo 4 / CA_SV_CS3 控制。 -->
+      <control_surface>
+        <name>servo_3</name>
+        <index>3</index>
+        <direction>-1</direction>
+        <CD_ctrl>4.68e-5</CD_ctrl>
+        <CY_ctrl>0</CY_ctrl>
+        <CL_ctrl>0.0075</CL_ctrl>
+        <Cl_ctrl>0.0</Cl_ctrl>
+        <Cm_ctrl>-0.023</Cm_ctrl>
+        <Cn_ctrl>0.0</Cn_ctrl>
+      </control_surface>
+      <!-- servo_4：左方向舵，主要影响侧力 CY_ctrl 和偏航力矩 Cn_ctrl；由 PX4 Servo 5 / CA_SV_CS4 控制。 -->
+      <control_surface>
+        <name>servo_4</name>
+        <index>4</index>
+        <direction>1</direction>
+        <CD_ctrl>0</CD_ctrl>
+        <CY_ctrl>-0.001125</CY_ctrl>
+        <CL_ctrl>0.0</CL_ctrl>
+        <Cl_ctrl>-3.08e-5</Cl_ctrl>
+        <Cm_ctrl>0.0</Cm_ctrl>
+        <Cn_ctrl>0.00368</Cn_ctrl>
+      </control_surface>
+      <!-- servo_5：右方向舵，与左方向舵同向用于偏航控制；由 PX4 Servo 6 / CA_SV_CS5 控制。 -->
+      <control_surface>
+        <name>servo_5</name>
+        <index>5</index>
+        <direction>1</direction>
+        <CD_ctrl>0</CD_ctrl>
+        <CY_ctrl>-0.001125</CY_ctrl>
+        <CL_ctrl>0.0</CL_ctrl>
+        <Cl_ctrl>-3.08e-5</Cl_ctrl>
+        <Cm_ctrl>0.0</Cm_ctrl>
+        <Cn_ctrl>0.00368</Cn_ctrl>
+      </control_surface>
+      <!-- servo_6：左鸭翼气动项。由 PX4 canard_setpoint 闭环控制，偏转 +15° ~ -50°。 -->
+      <control_surface>
+        <name>servo_6</name>
+        <index>6</index>
+        <direction>1</direction>
+        <CD_ctrl>1.91e-4</CD_ctrl>
+        <CY_ctrl>0</CY_ctrl>
+        <CL_ctrl>0.001787</CL_ctrl>
+        <Cl_ctrl>0</Cl_ctrl>
+        <Cm_ctrl>0.006049</Cm_ctrl>
+        <Cn_ctrl>0</Cn_ctrl>
+      </control_surface>
+      <!-- servo_7：右鸭翼气动项。由 PX4 canard_setpoint 闭环控制，偏转 +15° ~ -50°。 -->
+      <control_surface>
+        <name>servo_7</name>
+        <index>7</index>
+        <direction>1</direction>
+        <CD_ctrl>1.91e-4</CD_ctrl>
+        <CY_ctrl>0</CY_ctrl>
+        <CL_ctrl>0.001787</CL_ctrl>
+        <Cl_ctrl>0</Cl_ctrl>
+        <Cm_ctrl>0.006049</Cm_ctrl>
+        <Cn_ctrl>0</Cn_ctrl>
+      </control_surface>
+    </plugin>
+    <!--
+      动力系统插件：
+      使用 Gazebo 的 MulticopterMotorModel 近似固定翼尾推动力。
+      PX4 通过 command/motor_speed 发送电机转速命令；推力量级主要由 maxRotVelocity 和 motorConstant 决定。
+    -->
+    <plugin filename="gz-sim-multicopter-motor-model-system" name="gz::sim::systems::MulticopterMotorModel">
+      <!-- 被电机插件驱动的螺旋桨关节和 link。 -->
+      <jointName>rotor_puller_joint</jointName>
+      <linkName>rotor_puller</linkName>
+      <!-- 旋转方向；momentConstant 当前为 0，因此暂不引入反扭矩。 -->
+      <turningDirection>ccw</turningDirection>
+      <!-- 电机升/降速响应时间常数，影响油门瞬态。 -->
+      <timeConstantUp>0.08</timeConstantUp>
+      <timeConstantDown>0.12</timeConstantDown>
+      <!-- 最大转速和推力系数：当前用于匹配 150kg 起飞滑跑所需推力量级。 -->
+      <maxRotVelocity>5000</maxRotVelocity>
+      <motorConstant>2.234e-05</motorConstant>
+      <momentConstant>0.0</momentConstant>
+      <!-- PX4 Gazebo bridge 发布电机命令的话题后缀。 -->
+      <commandSubTopic>command/motor_speed</commandSubTopic>
+      <!-- 电机编号与 PX4 SIM_GZ_EC_FUNC1 / motor 1 对应。 -->
+      <motorNumber>0</motorNumber>
+      <!-- 螺旋桨空气阻尼和滚转力矩近似项。 -->
+      <rotorDragCoefficient>8.06428e-05</rotorDragCoefficient>
+      <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+      <!-- 仿真可视转速缩放，只影响仿真中的旋翼转动表现，不等于真实 RPM。 -->
+      <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+      <!-- velocity 模式表示插件按速度命令驱动电机。 -->
+      <motorType>velocity</motorType>
+    </plugin>
+  </model>
+</sdf>

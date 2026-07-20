@@ -1,0 +1,7 @@
+# Honghu A1 Word V2.5 aerodynamic table
+# canard coefficient increment table from Word; added delta=0 zero baseline
+alpha_deg/delta_deg,-4,0.0,4,8
+0,-0.0004,0,0.0004,0.001
+4,-0.001,0,0.001,0.001
+8,-0.002,0,0.002,0.003
+12,-0.003,0,0.003,0.003

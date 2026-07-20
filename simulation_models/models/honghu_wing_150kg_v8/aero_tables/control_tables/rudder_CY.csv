@@ -1,0 +1,7 @@
+# Honghu A1 V2.5 rudder local derivative table at delta_r_doc=+10 deg
+# alpha/beta in deg; values are coefficient derivative per deg
+# negative rudder uses aircraft reflection symmetry in the V8 core
+alpha_deg/beta_deg,-12,-8,-4,0,4,8,12
+0,-0.0035,-0.0036,-0.0035,-0.0035,-0.0037,-0.0036,-0.0036
+4,-0.0036,-0.0035,-0.0035,-0.0035,-0.0034,-0.0033,-0.0028
+8,-0.0035,-0.0035,-0.0034,-0.0033,-0.0031,-0.003,-0.0022

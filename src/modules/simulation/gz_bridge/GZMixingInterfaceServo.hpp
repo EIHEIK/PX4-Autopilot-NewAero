@@ -36,6 +36,8 @@
 #include <lib/mixer_module/mixer_module.hpp>
 
 #include <gz/transport.hh>
+
+#include <chrono>
 #include <px4_platform_common/module_params.h>
 
 // GZBridge mixing class for Servos.
@@ -81,31 +83,54 @@ private:
 	 */
 	float get_servo_angle_min(const size_t index);
 
+	/** Get configured angle at normalized zero command [rad]. */
+	float get_servo_angle_zero(const size_t index);
+
+	bool refreshServoPublishers();
+
 	gz::transport::Node &_node;
 	pthread_mutex_t _node_mutex;
 
 	MixingOutput _mixing_output{"SIM_GZ_SV", MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
 
 	std::vector<gz::transport::Node::Publisher> _servos_pub;
+	std::string _model_name;
+	std::chrono::steady_clock::time_point _next_connection_check{};
+	bool _publishers_connected{false};
+	unsigned _publisher_refresh_count{0};
 	std::vector<double> _angle_min_rad;
+	std::vector<double> _angle_zero_rad;
+	std::vector<double> _angle_max_rad;
 	std::vector<double> _angular_range_rad;
 
 	DEFINE_PARAMETERS(
+		(ParamBool<px4::params::SIM_GZ_SV_ZMAP>) _servo_zero_mapping,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA1>) _servo_max_angle_1,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA1>) _servo_min_angle_1,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA1>) _servo_zero_angle_1,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA2>) _servo_max_angle_2,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA2>) _servo_min_angle_2,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA2>) _servo_zero_angle_2,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA3>) _servo_max_angle_3,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA3>) _servo_min_angle_3,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA3>) _servo_zero_angle_3,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA4>) _servo_max_angle_4,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA4>) _servo_min_angle_4,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA4>) _servo_zero_angle_4,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA5>) _servo_max_angle_5,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA5>) _servo_min_angle_5,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA5>) _servo_zero_angle_5,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA6>) _servo_max_angle_6,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA6>) _servo_min_angle_6,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA6>) _servo_zero_angle_6,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA7>) _servo_max_angle_7,
 		(ParamFloat<px4::params::SIM_GZ_SV_MINA7>) _servo_min_angle_7,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA7>) _servo_zero_angle_7,
 		(ParamFloat<px4::params::SIM_GZ_SV_MAXA8>) _servo_max_angle_8,
-		(ParamFloat<px4::params::SIM_GZ_SV_MINA8>) _servo_min_angle_8
+		(ParamFloat<px4::params::SIM_GZ_SV_MINA8>) _servo_min_angle_8,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA8>) _servo_zero_angle_8,
+		(ParamFloat<px4::params::SIM_GZ_SV_MAXA9>) _servo_max_angle_9,
+		(ParamFloat<px4::params::SIM_GZ_SV_MINA9>) _servo_min_angle_9,
+		(ParamFloat<px4::params::SIM_GZ_SV_ZEROA9>) _servo_zero_angle_9
 	)
 };

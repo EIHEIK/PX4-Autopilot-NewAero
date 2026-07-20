@@ -163,6 +163,7 @@ private:
 	float _temperature{288.15};  // 15 degrees
 
 	bool _realtime_clock_set{false};
+	uint64_t _clock_timestamp_prev{};
 	gz::transport::Node _node;
 
 	// GPS noise model

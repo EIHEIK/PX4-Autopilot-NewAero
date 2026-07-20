@@ -138,8 +138,12 @@ void ActuatorEffectivenessControlSurfaces::updateParams()
 		case Type::LeftFlap:
 		case Type::RightFlap:
 		case Type::Airbrake:
-		case Type::Custom:
 			_params[i].torque.zero();
+			break;
+
+		case Type::Custom:
+			// Preserve the explicit CA_SV_CSx_TRQ_[RPY] vector. This is
+			// required when paired surfaces each represent half of an axis.
 			break;
 
 		case Type::LeftATail:

@@ -1,0 +1,6 @@
+# Honghu A1 Word V2.5 aerodynamic table
+# rudder coefficient increment table from Word for delta_r=+10deg
+alpha_deg/beta_deg,-12,-8,-4,0,4,8,12
+0,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007,0.0007
+4,0.0006,0.0006,0.0006,0.0007,0.0006,0.0006,0.0006
+8,0.0005,0.0005,0.0006,0.0006,0.0005,0.0005,0.0005
