@@ -426,7 +426,13 @@
     </plugin>
     <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
       <joint_name>nose_steering_joint</joint_name><sub_topic>servo_8</sub_topic>
-      <p_gain>5</p_gain><i_gain>0</i_gain><d_gain>0</d_gain><cmd_max>20</cmd_max><cmd_min>-20</cmd_min>
+      <!-- The steering actuator must overcome the tyre's static contact moment.
+           The previous 5 N.m/rad, +/-20 N.m controller produced essentially no
+           joint motion under aircraft weight. Keep the command below the
+           joint's 300 N.m structural effort limit. Derivative damping limits
+           transients, while the bounded integral removes tyre-friction bias. -->
+      <p_gain>1000</p_gain><i_gain>500</i_gain><d_gain>30</d_gain>
+      <i_max>80</i_max><i_min>-80</i_min><cmd_max>200</cmd_max><cmd_min>-200</cmd_min>
     </plugin>
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
       <joint_name>servo_0</joint_name><joint_name>servo_1</joint_name><joint_name>servo_2</joint_name><joint_name>servo_3</joint_name><joint_name>servo_4</joint_name><joint_name>servo_5</joint_name><joint_name>servo_6</joint_name><joint_name>servo_7</joint_name>

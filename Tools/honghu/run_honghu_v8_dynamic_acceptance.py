@@ -51,9 +51,9 @@ PROPULSION_TOPIC = f"/model/{MODEL}/honghu_v8/propulsion_state"
 POSE_TOPIC = "/world/honghu_v8/dynamic_pose/info"
 SERVO_TOPICS = {
     f"servo_{index}": f"/model/{MODEL}/servo_{index}"
-    # Elevator command traces are retained for direct command-to-joint phase
-    # checks during rotation; other surfaces remain available in aero_state.
-    for index in (2, 3)
+    # Elevator traces support rotation phase checks; servo_8 records the nose
+    # steering request used by the ground-path acceptance case.
+    for index in (2, 3, 8)
 }
 SITL_STATE_FILES = (
     ROOTFS / "parameters.bson",
@@ -281,6 +281,7 @@ class DynamicRun:
         cruise_observation_s: float = 30.0,
         mavlink_port: int = DEFAULT_TEST_MAVLINK_PORT,
         coincident_takeoff: bool = False,
+        initial_yaw_deg: float = 0.0,
     ) -> None:
         self.scenario = scenario
         self.step_size = step_size
@@ -290,6 +291,7 @@ class DynamicRun:
         self.cruise_observation_s = cruise_observation_s
         self.mavlink_port = mavlink_port
         self.coincident_takeoff = coincident_takeoff
+        self.initial_yaw_deg = initial_yaw_deg
         self.snapshot = SitlStateSnapshot()
         self.make_process: subprocess.Popen | None = None
         self.make_log_path: Path | None = None
@@ -324,7 +326,9 @@ class DynamicRun:
         # Production 4028 aligns the aircraft with the geographic XY mission.
         # Acceptance missions are deliberately eastbound, so override only the
         # test spawn yaw while retaining the validated 0.5145 m spawn height.
-        env["PX4_GZ_MODEL_POSE"] = "0,0,0.5145,0,0,0"
+        env["PX4_GZ_MODEL_POSE"] = (
+            f"0,0,0.5145,0,0,{math.radians(self.initial_yaw_deg):.9f}"
+        )
         # Keep automated acceptance independent of a concurrently open QGC,
         # which can otherwise claim both the standard remote endpoint and the
         # PX4 UDP partner learned through local port 18570.
@@ -426,7 +430,15 @@ class DynamicRun:
         metres_per_degree_lon = 111_111.0 * math.cos(math.radians(latitude))
         if self.scenario == "taxi":
             specifications = [
-                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0.0, 300.0, 0.0, 12.0),
+                # PX4 fixed-wing mission feasibility requires TAKEOFF first
+                # and a LAND endpoint. RWTO_TAXI_TEST consumes only TAKEOFF /
+                # WAYPOINT coordinates and stops before flight, so these
+                # altitudes do not command rotation during this ground test.
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0.0, 50.0, 45.0, 12.0),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0.0, 300.0, 45.0, 12.0),
+                # Keep the nominal landing glide slope below FW_LND_ANG so
+                # Navigator accepts the complete fixed-wing mission.
+                (mavutil.mavlink.MAV_CMD_NAV_LAND, 0.0, 1500.0, 0.0, 12.0),
             ]
         elif self.scenario == "route":
             specifications = [
@@ -648,6 +660,9 @@ class DynamicRun:
                 "vy_m_s": float(state.local.vy),
                 "vz_m_s": float(state.local.vz),
                 "groundspeed_m_s": math.hypot(float(state.local.vx), float(state.local.vy)),
+                "ground_course_deg": (
+                    math.degrees(math.atan2(float(state.local.vy), float(state.local.vx))) % 360.0
+                ),
                 "airspeed_m_s": float(state.vfr.airspeed),
                 "roll_deg": math.degrees(float(state.attitude.roll)),
                 "roll_setpoint_deg": quaternion_roll_deg(state.attitude_target.q)
@@ -800,6 +815,20 @@ class DynamicRun:
                 steady = samples
             rms_cross = math.sqrt(statistics.fmean(sample["cross_track_m"] ** 2 for sample in steady))
             mean_speed = statistics.fmean(sample["groundspeed_m_s"] for sample in steady)
+            target_heading_deg = 90.0
+            course_errors = [
+                abs((sample["ground_course_deg"] - target_heading_deg + 180.0) % 360.0 - 180.0)
+                for sample in samples if sample["groundspeed_m_s"] > 2.0
+            ]
+            early_count = max(1, min(len(course_errors), int(round(2.0 / 0.05))))
+            late_count = max(1, min(len(course_errors), int(round(5.0 / 0.05))))
+            initial_course_error = (
+                statistics.fmean(course_errors[:early_count]) if course_errors else float("nan")
+            )
+            final_course_error = (
+                statistics.fmean(course_errors[-late_count:]) if course_errors else float("nan")
+            )
+            steering_commands = self.aero.servo_command_samples.get("servo_8", [])
             metrics = {
                 "distance_m": max(sample["along_track_m"] for sample in samples),
                 "cross_track_rms_m": rms_cross,
@@ -809,12 +838,22 @@ class DynamicRun:
                 "altitude_gain_max_m": max(sample["altitude_gain_m"] for sample in samples),
                 "roll_max_abs_deg": max(abs(sample["roll_deg"]) for sample in samples),
                 "pitch_max_abs_deg": max(abs(sample["pitch_deg"]) for sample in samples),
+                "target_heading_deg": target_heading_deg,
+                "initial_ground_course_error_abs_deg": initial_course_error,
+                "final_ground_course_error_abs_deg": final_course_error,
+                "nose_steering_command_max_abs_deg": max(
+                    (abs(sample["angle_deg"]) for sample in steering_commands),
+                    default=float("nan"),
+                ),
             }
             checks = {
                 "distance_at_least_200m": metrics["distance_m"] >= 200.0,
                 "cross_track_rms_below_0p5m": rms_cross < 0.5,
                 "mean_speed_7_to_9m_s": 7.0 <= mean_speed <= 9.0,
                 "remained_on_ground": metrics["altitude_gain_max_m"] < 0.5,
+                "ground_course_error_not_increased": math.isfinite(final_course_error)
+                and math.isfinite(initial_course_error)
+                and final_course_error <= initial_course_error + 1.0,
             }
         elif self.scenario == "takeoff":
             takeoff_pose_samples = [
@@ -1308,12 +1347,18 @@ def main() -> None:
         "--coincident-takeoff", action="store_true",
         help="place TAKEOFF at the launch position to test RWTO_DIR_MIN next-waypoint fallback",
     )
+    parser.add_argument(
+        "--initial-yaw-deg", type=float, default=0.0,
+        help="Gazebo ENU spawn yaw [deg], useful for a taxi steering disturbance test",
+    )
     parser.add_argument("--no-assert", action="store_true", help="write measurements without a failing exit code")
     arguments = parser.parse_args()
     if not 1024 <= arguments.mavlink_port <= 62535:
         parser.error("--mavlink-port must be in 1024..62535")
     if arguments.coincident_takeoff and arguments.scenario not in ("takeoff", "flight"):
         parser.error("--coincident-takeoff is supported only by takeoff and flight scenarios")
+    if abs(arguments.initial_yaw_deg) > 30.0:
+        parser.error("--initial-yaw-deg must be within +/-30 degrees")
     default_timeouts = {
         "static": 62.0,
         "taxi": 70.0,
@@ -1342,6 +1387,7 @@ def main() -> None:
         arguments.cruise_observation,
         arguments.mavlink_port,
         arguments.coincident_takeoff,
+        arguments.initial_yaw_deg,
     )
     report = runner.execute()
     if arguments.json:

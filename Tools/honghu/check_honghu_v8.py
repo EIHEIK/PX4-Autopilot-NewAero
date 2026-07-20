@@ -127,9 +127,15 @@ def check_sdf_contract(root, gen):
     close(float(nose_joint.findtext("axis/dynamics/damping")), 0.05, label="nose steering damping")
     close(float(nose_joint.findtext("axis/dynamics/friction")), 0.001, label="nose steering friction")
     nose_controller = controllers["nose_steering_joint"]
-    close(float(nose_controller.findtext("p_gain")), 5.0, label="nose steering p_gain")
-    close(float(nose_controller.findtext("d_gain")), 0.0, label="nose steering d_gain")
-    close(float(nose_controller.findtext("cmd_max")), 20.0, label="nose steering cmd_max")
+    close(float(nose_controller.findtext("p_gain")), 1000.0, label="nose steering p_gain")
+    close(float(nose_controller.findtext("i_gain")), 500.0, label="nose steering i_gain")
+    close(float(nose_controller.findtext("d_gain")), 30.0, label="nose steering d_gain")
+    close(float(nose_controller.findtext("i_max")), 80.0, label="nose steering i_max")
+    close(float(nose_controller.findtext("i_min")), -80.0, label="nose steering i_min")
+    close(float(nose_controller.findtext("cmd_max")), 200.0, label="nose steering cmd_max")
+    close(float(nose_controller.findtext("cmd_min")), -200.0, label="nose steering cmd_min")
+    if float(nose_controller.findtext("cmd_max")) >= float(nose_joint.findtext("axis/limit/effort")):
+        fail("nose steering controller command must remain below the joint effort limit")
 
     aero = model.find("plugin[@name='honghu::v8::HonghuAeroV8']")
     for i, expected in enumerate(expected_axes):
@@ -339,7 +345,14 @@ def check_airframe():
         "param set SIM_GZ_EC_MAX1 1000",
         "param set FW_THR_MAX 1.0",
         "param set RWTO_MAX_THR 1.0",
-        "param set FW_W_TC 1.50",
+        "param set FW_W_TC 2.50",
+        "param set FW_WR_P 0.25",
+        "param set FW_WR_FF 0.08",
+        "param set FW_W_RMAX 20.0",
+        "param set FW_W_GSPD_SC 5.0",
+        "param set RWTO_TAXI_XTK_P 0.010",
+        "param set RWTO_TAXI_XMAX 20.0",
+        "param set RWTO_TAXI_YRMAX 15.0",
         "param set SIM_GZ_SV_MINA9 30",
         "param set SIM_GZ_SV_ZEROA9 0",
         "param set SIM_GZ_SV_MAXA9 -30",

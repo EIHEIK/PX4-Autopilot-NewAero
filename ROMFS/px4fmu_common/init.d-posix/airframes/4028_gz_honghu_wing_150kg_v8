@@ -148,10 +148,10 @@ param set RWTO_TAXI_SPD_P 0.025  # 地面滑跑速度比例增益
 param set RWTO_TAXI_SPD_I 0.0005 # 慢积分避免启动阶段积累后冲击10m/s保护阈值
 param set RWTO_TAXI_ARSP 10.0    # 地面滑行测试最大空速 [m/s]，超过后降到怠速
 param set RWTO_TAXI_GSPD 10.0    # 地面滑行测试最大地速 [m/s]，超过后降到怠速
-param set RWTO_TAXI_XTK_P 0.015  # V3/V7 rigid rolling-gear cross-track baseline [rad/m]
+param set RWTO_TAXI_XTK_P 0.010  # 前轮执行力修复后的有界横偏增益 [rad/m]
 param set RWTO_TAXI_ACC 12.0     # 地面滑跑任务航点默认到达半径 [m]
-param set RWTO_TAXI_XMAX 35.0    # 地面滑跑最大航向修正角 [deg]，允许更积极捕获航线
-param set RWTO_TAXI_YRMAX 30.0   # 地面滑跑航向设定变化率上限 [deg/s]，恢复到已验证可跟线的基线
+param set RWTO_TAXI_XMAX 20.0    # 地面滑跑最大航向修正角 [deg]，避免刚性轮胎过控
+param set RWTO_TAXI_YRMAX 15.0   # 地面滑跑航向设定变化率上限 [deg/s]
 param set RWTO_TAXI_TIME 180.0   # 地面滑行测试最大时长 [s]，0=不按时间自动收油
 param set-default RWTO_PSP 0.0           # 滑跑/抬轮前俯仰设定 [deg]
 param set-default RWTO_ROT_AIRSPD 35.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
@@ -161,12 +161,13 @@ param set RWTO_HDG 1            # 起飞滑跑前轮跟随航线方位(1=跟随�
 param set RWTO_DIR_MIN 50       # coincident TAKEOFF point defines altitude only; use the next mission waypoint for runway direction [m]
 param set-default RWTO_NPFG_PERIOD 8.0   # 跑道转向阶段使用较慢的横向制导周期 [s]
 param set FW_W_EN 1              # 启用跑道滑跑/降落用前轮转向控制器
-param set FW_W_TC 1.50           # V8前轮航向外环时间常数；保持已验证稳定基线
-param set FW_WR_P 0.50           # 前轮偏航角速度比例增益，恢复到已验证可跟线的基线
+param set FW_W_TC 2.50           # 前轮执行力修复后放慢航向外环，避免低速过控
+param set FW_WR_P 0.25           # 约1deg级轮角权威；5deg扰动试验保持可控并出现回线趋势
 param set FW_WR_I 0.00           # 仿真无恒定转向偏置；禁用初始航向捕获造成的积分残留
 param set FW_WR_IMAX 0.30        # 前轮积分输出上限，防止地面持续饱和
-param set FW_WR_FF 0.20          # 前轮偏航角速度前馈，恢复到已验证可跟线的基线
-param set FW_W_RMAX 45.0         # 前轮控制器最大目标偏航角速度 [deg/s]，恢复到已验证可跟线的基线
+param set FW_WR_FF 0.08          # 降低前馈，避免反打前积累过大的偏航惯性
+param set FW_W_RMAX 20.0         # 限制地面目标偏航角速度 [deg/s]
+param set FW_W_GSPD_SC 5.0       # 5m/s以上按地速降低前轮权威，保护高速起飞滑跑
 param set EKF2_GPS_CHECK 0       # 仿真地面滑跑关闭 EKF GPS 质量门限，避免航向/位置初始化失败
 param set EKF2_REQ_HDRIFT 5.0    # 仿真地面滑行时放宽 GPS 静止水平漂移/速度检查，避免短暂位置 failsafe
 
