@@ -1,7 +1,9 @@
 # 鸿鹄翼 V8 整体架构、实现说明与 V3 控制对比
 
 > 文档日期：2026-07-19
-> 代码仓库：`/home/fly/PX4-Autopilot-canard-2026.6.2`
+> 当前代码仓库：`/home/fly/PX4-Autopilot-NewAero`
+> 当前私有远端：`https://github.com/EIHEIK/PX4-Autopilot-NewAero`
+> 历史源仓库：`/home/fly/PX4-Autopilot-canard-2026.6.2`
 > V8 启动目标：`make px4_sitl gz_honghu_wing_150kg_v8`
 > V8 机型编号：`SYS_AUTOSTART=4028`
 > V3 机型编号：`SYS_AUTOSTART=4024`

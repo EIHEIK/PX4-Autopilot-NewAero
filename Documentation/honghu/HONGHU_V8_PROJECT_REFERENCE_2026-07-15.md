@@ -1,7 +1,9 @@
 # 鸿鹄翼 A1 / PX4–Gazebo V8 项目综合参考
 
-> 当前工作区事实快照，首次整理：2026-07-15；最近复核：2026-07-17 10:25（Asia/Shanghai）
-> PX4 工作区：/home/fly/PX4-Autopilot-canard-2026.6.2
+> 当前工作区事实快照，首次整理：2026-07-15；最近复核：2026-07-20（Asia/Shanghai）
+> 当前 PX4 工作区：/home/fly/PX4-Autopilot-NewAero
+> 当前私有远端：https://github.com/EIHEIK/PX4-Autopilot-NewAero
+> 历史源工作区：/home/fly/PX4-Autopilot-canard-2026.6.2（保留作对照，不再作为默认开发入口）
 > V8 启动命令：make px4_sitl gz_honghu_wing_150kg_v8
 > PX4 机型编号：SYS_AUTOSTART=4028
 > 本文用途：作为后续开发、复现、验收和问题交接的单一入口。
@@ -14,7 +16,7 @@
 1. 本项目对话中已经确认的需求、修订意见和验收目标。
 2. 当前 WSL 工作区内的 V8 模型、PX4 修改、Gazebo 插件和测试工具。
 3. /home/fly/px4_reference_docs/current/鸿鹄翼A1样机仿真参数_V2.5(2).pdf 的文本与关键页面视觉核对结果。
-4. /home/fly/PX4-Autopilot-canard-2026.6.2/analysis_outputs 下的实际验收 JSON。
+4. /home/fly/PX4-Autopilot-NewAero/analysis_outputs 下保留的最终验收 JSON，以及历史源工作区中的原始验收记录。
 5. Git 当前分支、提交历史和未提交工作区状态。
 6. 既有 V3–V7 文档和交接记录，仅作为历史背景和对比依据。
 
@@ -63,7 +65,7 @@ Codex 的 /home/fly/.codex/memories/MEMORY.md 与 memory_summary.md 当前均明
 当前正式任务上传命令为：
 
 ~~~bash
-python3 /home/fly/PX4-Autopilot-canard-2026.6.2/Tools/honghu/upload_qgc_plan.py \
+python3 /home/fly/PX4-Autopilot-NewAero/Tools/honghu/upload_qgc_plan.py \
   /home/fly/px4_reference_docs/current/模仿XY航线规划.plan
 ~~~
 
@@ -88,8 +90,8 @@ PDF 数据在 V8 中分成三类：
 
 数据来源标记集中在：
 
-- /home/fly/PX4-Autopilot-canard-2026.6.2/simulation_models/models/honghu_wing_150kg_v8/data_provenance.yaml
-- /home/fly/PX4-Autopilot-canard-2026.6.2/simulation_models/models/honghu_wing_150kg_v8/README.md
+- /home/fly/PX4-Autopilot-NewAero/simulation_models/models/honghu_wing_150kg_v8/data_provenance.yaml
+- /home/fly/PX4-Autopilot-NewAero/simulation_models/models/honghu_wing_150kg_v8/README.md
 
 ### 2.1 PDF 自身的重要歧义
 
@@ -1887,6 +1889,98 @@ sha256sum ROMFS/px4fmu_common/init.d-posix/airframes/4028_gz_honghu_wing_150kg_v
 13. 可飞的无折返任务稳态横向 RMS<30 m、p95<60 m；当前最终默认报告实际达到
     1.80/3.68 m，后续改动不得无说明地回退。
 
+## 18. 2026-07-20 新仓库迁移、首次启动与参数持久化
+
+### 18.1 当前代码仓库和 GitHub 状态
+
+2026-07-20 已从历史源工作区
+`/home/fly/PX4-Autopilot-canard-2026.6.2` 导出独立工作区：
+
+~~~text
+/home/fly/PX4-Autopilot-NewAero
+~~~
+
+当前私有 GitHub 仓库为：
+
+~~~text
+https://github.com/EIHEIK/PX4-Autopilot-NewAero
+~~~
+
+首次上传基线提交为
+`51e344baa19ecc398bc4f9388d53772d6b228bea`，本地与远端 `main` 哈希已经核对一致。
+新仓库保留 PX4 Git 历史及鸿鹄 V5-V8 源码，但有意排除了可再生成的 `build/`、
+原始 ULog、临时渲染文件和大规模调参中间产物。四份选定的 V8 最终 JSON 保留在
+`analysis_outputs/`。`Tools/simulation/gz` 在新仓库中由子模块改为 vendored 目录，
+以确保普通 clone 能直接取得 V8 world 和本项目使用的 Gazebo 文件。
+
+远端设置如下：
+
+| remote | 用途 |
+|---|---|
+| `origin` | `git@github.com:EIHEIK/PX4-Autopilot-NewAero.git`，当前开发与推送目标 |
+| `source` | 原 `uuwq224/PX4-Autopilot-canard-2026.6.2`，只作历史来源 |
+| `upstream` | PX4 官方仓库；push 被禁用 |
+
+### 18.2 新仓库首次仿真结果
+
+在新工作区执行 `make px4_sitl gz_honghu_wing_150kg_v8` 已成功完成首次运行。终端和
+ULog确认：
+
+- 运行版本为 `51e344baa19ecc398bc4f9388d53772d6b228bea`、分支 `main`；
+- Gazebo WGS84 原点为 `28.5712315, 121.5759172, 0 m`；
+- 模型初始 ENU yaw 为 `1.1349764 rad`，对应约 `24.97 deg` 真航向；
+- 任务进入 `Executing Mission`，滑跑阶段航向误差约在 1 deg 以内；
+- Commander 约在 32 m/s 报告 `Takeoff detected`，终端记录继续到约 43.5 m/s；
+- 对应日志为
+  `build/px4_sitl_default/rootfs/log/2026-07-20/02_46_35.ulg`，大小约245 MB、
+  时长13 min 47 s，`ulog_info` 报告 `No Dropouts`；
+- 末尾 `PX4 Exiting` 与 `ninja: ... interrupted by user` 是人工中断，不是仿真崩溃。
+
+启动早期的 `Airspeed invalid`、`ekf2 missing data` 后续自行恢复；三条
+`vehicle_command_ack lost` 没有阻止解锁、任务执行或日志记录。它们应继续观察，
+但本次没有形成飞行阻断证据。
+
+### 18.3 为什么首次启动会打印大量参数变化
+
+该现象在这次新工作区首次运行中是正常的。新仓库没有复制历史 `build/`，因此新的
+`build/px4_sitl_default/rootfs` 起初没有可导入的 `parameters.bson`。`rcS` 根据模型名
+找到 `SYS_AUTOSTART=4028`，发现已保存的机型号仍为0，于是临时设置
+`SYS_AUTOCONFIG=1`、复位非保留参数、写入SITL传感器标定并加载4028机型参数。
+终端因此逐项显示 `curr -> new`。
+
+这不是每次启动都会重新清空参数。首次运行结束后的ULog实际参数为：
+
+~~~text
+SYS_AUTOCONFIG = 0
+SYS_AUTOSTART  = 4028
+FW_PR_P       = 0.40
+FW_R_LIM      = 30
+NPFG_PERIOD   = 20
+NAV_ACC_RAD   = 250
+SIM_GZ_SV_MINA9 = 30
+~~~
+
+同时已经生成约1.8 KB的 `parameters.bson` 和备份文件。后续以相同机型启动时会先导入
+该文件，不应再次出现整套自动配置；若删除 `build/`、删除参数文件、切换机型，或在
+QGC中请求恢复机型默认值，则可能再次出现。
+
+必须区分4028中的两种写法：
+
+| 写法 | 当前V8语义 | 对QGC调参的影响 |
+|---|---|---|
+| `param set NAME value` | 每次启动强制应用已验证的V8基线 | QGC可以在当次运行修改并保存，但下一次启动会被4028写回 |
+| `param set-default NAME value` | 只改变该参数的机型默认值 | 已保存的QGC值通常可跨重启保留，除非执行参数重置/自动配置 |
+
+当前4028有意用 `param set` 固化关键空速、TECS/俯仰、滚转、NPFG、航点半径、跑道
+控制、舵机角度映射和鸭翼基线。因此，若以后希望QGC自动调参结果跨重启成为正式候选，
+不能只在QGC点击保存：应先导出参数、记录ULog和试验条件，再经评审把选定值写入4028，
+或者有意识地把相应行改成 `param set-default`。机械行程、通道映射和安全边界不建议为
+方便临时调参而解除强制设置。
+
 ---
 
-本文件是截至2026-07-17 10:25的当前工作区综合事实快照。后续任何改变气动表、舵效解释、质量惯量、起落架、步长、控制增益、任务几何或鸭翼状态机的操作，都应同步更新本文件中的“当前状态”和“验收证据”，并保留对应参数快照和日志，避免用新结论覆盖历史事实。
+本文件是截至2026-07-20的当前工作区综合事实快照。后续默认开发入口为
+`/home/fly/PX4-Autopilot-NewAero`。文中仍出现的旧仓库绝对路径主要用于历史证据定位；
+执行当前命令时应优先替换为新工作区路径。后续任何改变气动表、舵效解释、质量惯量、
+起落架、步长、控制增益、任务几何或鸭翼状态机的操作，都应同步更新本文件中的
+“当前状态”和“验收证据”，并保留对应参数快照和日志，避免用新结论覆盖历史事实。
