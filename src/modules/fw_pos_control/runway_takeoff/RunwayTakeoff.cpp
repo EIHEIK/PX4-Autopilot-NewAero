@@ -218,8 +218,13 @@ float RunwayTakeoff::getMinPitch(float min_pitch_in_climbout, float min_pitch) c
 	}
 }
 
-float RunwayTakeoff::getMaxPitch(const float max_pitch) const
+float RunwayTakeoff::getMaxPitch(const float max_pitch, const float restriction_blend) const
 {
+	const float configured_takeoff_max = param_rwto_pmax_.get() >= 0.f ?
+		math::min(max_pitch, math::radians(param_rwto_pmax_.get())) : max_pitch;
+	const float phase_blend = math::constrain(restriction_blend, 0.f, 1.f);
+	const float active_max_pitch = max_pitch + phase_blend * (configured_takeoff_max - max_pitch);
+
 	if (takeoff_state_ < RunwayTakeoffState::CLIMBOUT) {
 		// constrain to the taxi pitch setpoint
 		return math::radians(param_rwto_psp_.get() + 0.01f);
@@ -227,10 +232,10 @@ float RunwayTakeoff::getMaxPitch(const float max_pitch) const
 	} else if (takeoff_state_ < RunwayTakeoffState::FLY) {
 		// ramp in the climbout pitch constraint over the rotation transition time
 		const float taxi_pitch_max = math::radians(param_rwto_psp_.get() + 0.01f);
-		return interpolateValuesOverAbsoluteTime(taxi_pitch_max, max_pitch, takeoff_time_, param_rwto_rot_time_.get());
+		return interpolateValuesOverAbsoluteTime(taxi_pitch_max, active_max_pitch, takeoff_time_, param_rwto_rot_time_.get());
 
 	} else {
-		return max_pitch;
+		return active_max_pitch;
 	}
 }
 

@@ -16,7 +16,10 @@ engineering_assumptions:
   mass_properties: fixed_150kg
   gear: rigid_wheel_carriers_phase_1; main_wheels_free_spin; nose_wheel_steered_and_free_spin
   gear_coordinates: PDF_points_converted_to_CG_centered_Gazebo_FLU
-  ground_contact: main_mu_mu2_0.8_2.0; nose_mu_mu2_1.2_3.0; kp_2e6; kd_2e4; max_vel_0.2m_s; min_depth_0.5mm
+  ground_contact: main_mu_mu2_0.8_2.0; nose_mu_mu2_1.0_1.0; kp_2e6; kd_2e4; max_vel_0.2m_s; min_depth_0.5mm
+  nose_steering_actuator: PID_500_200_1; integrator_limit_40Nm; command_limit_100Nm; replaces_rejected_1000_500_30_constraint_exciting_controller
+  magnetic_field: PX4_WMM2020_at_28.5712315N_121.5759172E; NED_to_Gazebo_ENU; -3.55621019e-6_3.46940371e-5_-3.25102706e-5_T
+  harmonic_mag_bridge: HonghuMagnetometerV8 publishes inverse_legacy_encoding so unchanged PX4 [-Y,-X,+Z] callback yields exact FRD; earlier_2D_declination_parameter_removed; native Harmonic magnetometer removed only from V8
   accepted_physics_step: 2ms_500Hz_realtime_baseline; sub_2ms_requires_bridge_capacity_fix_before_convergence_claim
   takeoff_pitch_control: pitch_sp_limit_8deg; rate_limit_6deg_s; runway_ff_6.6_released_by_q_2deg_s; positive_runway_control_limit_0.35_released_over_accumulated_rotation_2_to_6deg; rate_D_air_0.10; airborne_rate_PID_FF_0.40_0.04_0.10_0.75
   airborne_lateral_control: roll_rate_PID_FF_0.26_0.05_0.06_1.45; roll_TC_0.65s; rate_limit_20deg_s; roll_limit_30deg; NPFG_20s_damping_0.80_selected_from_clean_15s_20s_QGC_logs

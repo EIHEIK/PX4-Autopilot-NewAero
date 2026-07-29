@@ -48,7 +48,7 @@ def read_json_messages(topic: str, count: int, env: dict[str, str]) -> list[dict
 def read_aero_frames(count: int, env: dict[str, str]) -> list[list[float]]:
     messages = read_json_messages(AERO_TOPIC, count, env)
     frames = [message["data"] for message in messages]
-    if len(frames) != count or any(len(frame) != 76 for frame in frames):
+    if len(frames) != count or any(len(frame) < 76 for frame in frames):
         raise RuntimeError("incomplete aero_state diagnostic frame")
     return frames
 

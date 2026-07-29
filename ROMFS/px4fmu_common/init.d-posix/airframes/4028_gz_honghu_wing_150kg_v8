@@ -55,12 +55,18 @@ PX4_GZ_SET_HOME_COORDINATES=${PX4_GZ_SET_HOME_COORDINATES:=1}
 # 24.97 deg. In an ENU world this corresponds to a +65.03 deg model yaw.
 # The dynamic acceptance tool overrides this to yaw=0 for its eastbound route.
 PX4_GZ_MODEL_POSE=${PX4_GZ_MODEL_POSE:=0,0,0.5145,0,0,1.1349764}
-export PX4_GZ_MAX_STEP_SIZE PX4_GZ_HOME_LAT PX4_GZ_HOME_LON PX4_GZ_HOME_ALT PX4_GZ_HOME_HEADING PX4_GZ_SET_HOME_COORDINATES PX4_GZ_MODEL_POSE
+# PX4 WMM-2020 field at the V8 WGS84 origin, converted from NED to Gazebo ENU.
+PX4_GZ_MAG_FIELD_X=${PX4_GZ_MAG_FIELD_X:=-3.55621019e-06}
+PX4_GZ_MAG_FIELD_Y=${PX4_GZ_MAG_FIELD_Y:=3.46940371e-05}
+PX4_GZ_MAG_FIELD_Z=${PX4_GZ_MAG_FIELD_Z:=-3.25102706e-05}
+export PX4_GZ_MAX_STEP_SIZE PX4_GZ_HOME_LAT PX4_GZ_HOME_LON PX4_GZ_HOME_ALT PX4_GZ_HOME_HEADING PX4_GZ_SET_HOME_COORDINATES PX4_GZ_MODEL_POSE PX4_GZ_MAG_FIELD_X PX4_GZ_MAG_FIELD_Y PX4_GZ_MAG_FIELD_Z
 
 param set-default SIM_GZ_EN 1
 param set-default SENS_EN_GPSSIM 1
 param set-default SENS_EN_MAGSIM 1
 param set-default SENS_EN_ARSPDSIM 1
+# HonghuMagnetometerV8 supplies an exact three-dimensional FRD field through
+# the unchanged official Harmonic bridge.
 
 # Airspeed and safety limits (tuned for simulation stability)
 # Critical taxi-test baseline parameters below use "param set" instead of
@@ -83,26 +89,35 @@ param set-default FW_T_SPDWEIGHT 1.0     # TECS 速度/高度平衡权重
 # real-aircraft trim can be learned, while adding enough damping and response
 # to reject the documented thrust-line pitching moment.
 param set FW_T_I_GAIN_PIT 0.05           # retained TECS pitch integrator; faster than the stable 0.03 probe
-param set FW_T_PTCH_DAMP 0.15            # energy-balance-rate damping for the long-period height mode
+param set FW_T_PTCH_DAMP 0.30            # full-route validation: damps turn/segment longitudinal oscillation without slowing the inner loop
 param set FW_T_ALT_TC 3.5                 # reduce the level-handoff height dip without exciting the phugoid
 param set FW_T_RLL2THR 20                 # bank-angle throttle compensation preserves height in sustained turns
-param set FW_P_LIM_MAX 8                 # 和缓抬头设定上限 [deg]；Gazebo 真值俯仰必须不超过 12 deg
+param set FW_P_LIM_MAX 10                # cruise authority; takeoff/landing limits use height triggers and timed transitions
 param set-default FW_P_LIM_MIN -10       # 最大低头/俯冲设定 [deg]
 param set-default FW_TKO_PITCH_MIN 8     # 抬轮后的最小爬升俯仰角 [deg]
+param set RWTO_PMAX 8                    # near-runway takeoff pitch ceiling for rear-propeller clearance
+param set FW_LND_PMAX 8                  # low-height approach pitch ceiling
+param set FW_P_TKO_HGT 50                # crossing 50 m above takeoff point triggers release to cruise authority
+param set FW_P_LND_HGT 50                # first descent below 50 m AGL triggers landing authority
+param set FW_P_TRANS_DUR 5               # both phase changes use a 5 s smoothstep instead of continuous height mapping
 # V8 airborne pitch-rate loop. The PDF engine position and 3 deg down-thrust
 # produce a real nose-down throttle coupling, so the earlier weak V3-style
 # gains only balanced the engine moment and left no pull-out margin. These use
 # "param set" intentionally so stale parameters.bson values cannot restore it.
-param set TRIM_PITCH 0.03        # nominal 40 m/s pitch trim; integrators remain active for unknown real trim
+param set TRIM_PITCH -0.02       # re-trimmed for the V8 +6 deg fixed canard; integrators remain active for unknown real trim
 param set FW_PR_D 0.10           # airborne pitch angular-acceleration damping at the validated 2 ms step
-param set FW_PR_FF 0.75          # tracks the existing 6 deg/s command during 30 deg banks; runway boost remains separate
+param set FW_PR_FF 0.90          # improves signed pitch-rate tracking in climb and 30 deg banks; runway boost remains separate
 param set FW_PR_FF_RWTO 6.6      # 跑道解锁前馈；2 deg/s内退回空中前馈，兼顾早抬轮与低过冲
+param set FW_PR_FF_LND 6.6       # 降落拉平专用前馈；仅降落轮控窗口启用，不再借用起飞逻辑
 param set FW_PR_RWTO_Q 2.0       # 机头开始转动后在 2 deg/s 内释放跑道助力，兼顾抬轮与过冲
 param set FW_PR_I 0.04           # retained pitch-rate integrator for CG/servo/aero trim changes
 param set FW_PR_IMAX 0.12        # bounded trim authority preserves turn pull-up margin without dominating reversals
 param set FW_PR_P 0.40           # closes banked-flight rate error without removing the real-trim integrator
 param set FW_P_TC 0.8            # airborne pitch attitude outer-loop time constant [s]
-param set FW_P_RMAX_POS 6        # 和缓抬头：最大正俯仰角速度设定 [deg/s]
+param set FW_P_RMAX_POS 10       # cruise/turn positive pitch-rate authority
+param set FW_P_RMAX_TKO 6        # near-runway takeoff rate retained from the stable baseline
+param set FW_P_RMAX_LND 6        # low-height landing rate limit
+param set FW_P_RMAX_SLEW 2       # phase-limit transition [deg/s^2], avoids task/height switching steps
 param set FW_P_RMAX_NEG 10       # symmetric-enough nose-down limit avoids exciting the long-period mode
 
 param set FW_RR_D 0.06           # reversal damping for the no-foldback 30 deg course-change acceptance route
@@ -136,7 +151,7 @@ param set-default FW_T_THR_LOW_HGT 30    # 低于该高度时启用更紧的 TEC
 param set-default RWTO_TKOFF 1           # 启用跑道起飞逻辑
 param set RWTO_MAX_THR 1.0              # 35 m/s 后继续加速所需，避免 75% 推力与阻力平衡
 param set-default RWTO_RAMP_TIME 5.0     # 从怠速爬升到 RWTO_MAX_THR 的时间 [s]
-param set-default RWTO_ROT_TIME 1.0      # 一秒内建立起飞俯仰约束，避免高速长距离拖轮
+param set RWTO_ROT_TIME 6.0              # 6 s和缓建立起飞俯仰约束；为10 deg后置螺旋桨擦地角保留约2 deg余量
 param set RWTO_TAXI_TEST 0               # 地面滑行测试模式：1=仅用于低速地面滑跑测试，正式起飞必须保持0
 param set RWTO_TAXI_TOFF 0               # 历史兼容参数；正式起飞不再通过该参数串接滑跑测试逻辑
 param set RWTO_TAXI_THR 0.10     # 旧开环滑行油门保留给RunwayTakeoff内部兼容分支
@@ -277,7 +292,7 @@ param set-default FD_ESCS_EN 0
 # ---------------------------------------------------------------------------
 # FW_CANARD_TO:  Takeoff cruise canard setting (0=neutral, 1=max trailing-edge-down)
 param set FW_CANARD_NEUT   0.5
-param set FW_CANARD_TO     0.266667 # +4 deg PDF takeoff/trim baseline; retained in flight as in V3
+param set FW_CANARD_TO     0.4      # +6 deg takeoff/cruise setting requested for V8; retained in flight by the V3-derived state logic
 # FW_CANARD_BRK: Aerodynamic braking canard setting (0=neutral, 1=max trailing-edge-up)
 param set FW_CANARD_BRK    1.0
 # FW_CANARD_LND_H:  Touchdown AGL height threshold [m]

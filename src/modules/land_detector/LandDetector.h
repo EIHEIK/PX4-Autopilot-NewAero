@@ -139,6 +139,7 @@ protected:
 	virtual bool _get_horizontal_movement() { return false; }
 	virtual bool _get_vertical_movement() { return false; }
 	virtual bool _get_rotational_movement() { return false; }
+	virtual bool _get_at_rest_state() { return _at_rest; }
 	virtual bool _get_close_to_ground_or_skipped_check() {  return false; }
 	virtual void _set_hysteresis_factor(const int factor) = 0;
 

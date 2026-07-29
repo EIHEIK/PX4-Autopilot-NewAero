@@ -79,6 +79,10 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic("gimbal_controls", 200);
 	add_optional_topic("gripper");
 	add_optional_topic("heater_status");
+	// V8 truth is consumed after flight. 50 Hz is sufficient for the 4 rad/s
+	// surface-rate limit and avoids turning diagnostics into a real-time load.
+	add_optional_topic("honghu_v8_aero_state", 20);
+	add_optional_topic("honghu_v8_propulsion_state", 20);
 	add_topic("home_position");
 	add_topic("hover_thrust_estimate", 100);
 	add_topic("input_rc", 500);

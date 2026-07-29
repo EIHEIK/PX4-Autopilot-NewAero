@@ -20,6 +20,23 @@ GZ_INIT = ROOT / "ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim"
 GENERATOR = ROOT / "Tools/honghu/generate_honghu_v8_model.py"
 PROVENANCE = MODEL / "data_provenance.yaml"
 README = MODEL / "README.md"
+GZ_BRIDGE = ROOT / "src/modules/simulation/gz_bridge/GZBridge.cpp"
+AERO_SOURCE = ROOT / "src/modules/simulation/gz_plugins/honghu_v8/HonghuAeroV8.cpp"
+PROPULSION_SOURCE = ROOT / "src/modules/simulation/gz_plugins/honghu_v8/HonghuPropulsionV8.cpp"
+MAGNETOMETER_SOURCE = ROOT / "src/modules/simulation/gz_plugins/honghu_v8/HonghuMagnetometerV8.cpp"
+LAND_DETECTOR = ROOT / "src/modules/land_detector/LandDetector.cpp"
+FIXEDWING_LAND_DETECTOR = ROOT / "src/modules/land_detector/FixedwingLandDetector.cpp"
+GZ_BRIDGE_HEADER = ROOT / "src/modules/simulation/gz_bridge/GZBridge.hpp"
+LOGGER_TOPICS = ROOT / "src/modules/logger/logged_topics.cpp"
+MESSAGE_CMAKE = ROOT / "msg/CMakeLists.txt"
+AERO_MESSAGE = ROOT / "msg/HonghuV8AeroState.msg"
+PROPULSION_MESSAGE = ROOT / "msg/HonghuV8PropulsionState.msg"
+AERO_COEFFICIENT_ANALYZER = ROOT / "Tools/honghu/analyze_honghu_v8_aero_coefficients.py"
+DYNAMIC_ACCEPTANCE = ROOT / "Tools/honghu/run_honghu_v8_dynamic_acceptance.py"
+ATTITUDE_SETPOINT_MESSAGE = ROOT / "msg/versioned/VehicleAttitudeSetpoint.msg"
+FW_POSITION_CONTROL = ROOT / "src/modules/fw_pos_control/FixedwingPositionControl.cpp"
+FW_ATTITUDE_CONTROL = ROOT / "src/modules/fw_att_control/FixedwingAttitudeControl.cpp"
+FW_RATE_CONTROL = ROOT / "src/modules/fw_rate_control/FixedwingRateControl.cpp"
 TOL = 1e-8
 
 
@@ -99,6 +116,45 @@ def check_sdf_contract(root, gen):
         fail("wrong model name")
     close(float(model.findtext("pose").split()[2]), 0.5145, label="spawn height")
 
+    # Like PX4's official advanced_plane, all navigation sensors are mounted
+    # directly in base_link with identity orientation. Any later sensor offset
+    # must be explicit so the bridge never receives a silently rotated frame.
+    base = model.find("link[@name='base_link']")
+    sensor_contract = {
+        "imu_sensor": "imu",
+        "air_pressure_sensor": "air_pressure",
+        "navsat_sensor": "navsat",
+    }
+    for name, sensor_type in sensor_contract.items():
+        sensor = base.find(f"sensor[@name='{name}']") if base is not None else None
+        if sensor is None or sensor.attrib.get("type") != sensor_type:
+            fail(f"{name} must be mounted directly in base_link as {sensor_type}")
+        if sensor.find("pose") is not None:
+            pose = tuple(float(value) for value in sensor.findtext("pose").split())
+            if any(abs(value) > TOL for value in pose):
+                fail(f"{name} has an undocumented non-identity sensor pose: {pose}")
+
+    if base.find("sensor[@name='magnetometer_sensor']") is not None:
+        fail("V8 must not use Harmonic's native NED/ENU magnetometer path")
+
+    magnetometer = model.find("plugin[@name='honghu::v8::HonghuMagnetometerV8']")
+    if magnetometer is None:
+        fail("V8 exact three-dimensional magnetometer plugin is missing")
+    if magnetometer.findtext("link_name") != "base_link":
+        fail("V8 magnetometer must use base_link")
+    field = tuple(float(value) for value in magnetometer.findtext("field_ned_gauss").split())
+    for index, expected in enumerate((0.346940371, -0.035562102, 0.325102706)):
+        close(field[index], expected, tol=1e-10, label=f"magnetic NED field[{index}]")
+    magnetic_source = MAGNETOMETER_SOURCE.read_text(encoding="utf-8")
+    for contract in (
+        "_field_ned_gauss.Y(), _field_ned_gauss.X(), -_field_ned_gauss.Z()",
+        "field_flu.X(), -field_flu.Y(), -field_flu.Z()",
+        "message.mutable_field_tesla()->set_x(-field_frd.Y())",
+        "message.mutable_field_tesla()->set_y(-field_frd.X())",
+    ):
+        if contract not in magnetic_source:
+            fail(f"missing V8 three-dimensional magnetic contract: {contract}")
+
     expected_axes = []
     for i, row in enumerate(gen.CONTROLS):
         joint = model.find(f"joint[@name='servo_{i}']")
@@ -127,13 +183,13 @@ def check_sdf_contract(root, gen):
     close(float(nose_joint.findtext("axis/dynamics/damping")), 0.05, label="nose steering damping")
     close(float(nose_joint.findtext("axis/dynamics/friction")), 0.001, label="nose steering friction")
     nose_controller = controllers["nose_steering_joint"]
-    close(float(nose_controller.findtext("p_gain")), 1000.0, label="nose steering p_gain")
-    close(float(nose_controller.findtext("i_gain")), 500.0, label="nose steering i_gain")
-    close(float(nose_controller.findtext("d_gain")), 30.0, label="nose steering d_gain")
-    close(float(nose_controller.findtext("i_max")), 80.0, label="nose steering i_max")
-    close(float(nose_controller.findtext("i_min")), -80.0, label="nose steering i_min")
-    close(float(nose_controller.findtext("cmd_max")), 200.0, label="nose steering cmd_max")
-    close(float(nose_controller.findtext("cmd_min")), -200.0, label="nose steering cmd_min")
+    close(float(nose_controller.findtext("p_gain")), 500.0, label="nose steering p_gain")
+    close(float(nose_controller.findtext("i_gain")), 200.0, label="nose steering i_gain")
+    close(float(nose_controller.findtext("d_gain")), 1.0, label="nose steering d_gain")
+    close(float(nose_controller.findtext("i_max")), 40.0, label="nose steering i_max")
+    close(float(nose_controller.findtext("i_min")), -40.0, label="nose steering i_min")
+    close(float(nose_controller.findtext("cmd_max")), 100.0, label="nose steering cmd_max")
+    close(float(nose_controller.findtext("cmd_min")), -100.0, label="nose steering cmd_min")
     if float(nose_controller.findtext("cmd_max")) >= float(nose_joint.findtext("axis/limit/effort")):
         fail("nose steering controller command must remain below the joint effort limit")
 
@@ -165,7 +221,7 @@ def check_sdf_contract(root, gen):
     wheel_contract = {
         "left_main_wheel": ("left_main_wheel_collision", 0.0594, 0.1060, 0.8, 2.0),
         "right_main_wheel": ("right_main_wheel_collision", 0.0594, 0.1060, 0.8, 2.0),
-        "nose_wheel": ("nose_wheel_collision", 0.0439, 0.1363, 1.2, 3.0),
+        "nose_wheel": ("nose_wheel_collision", 0.0439, 0.1363, 1.0, 1.0),
     }
     for link_name, (collision_name, radius, length, mu, mu2) in wheel_contract.items():
         link = model.find(f"link[@name='{link_name}']")
@@ -261,6 +317,167 @@ def check_control_signs():
     close(0.5 * (theta_canard[6] + theta_canard[7]), 1, label="PX4 canard to delta_c")
 
 
+def check_frame_interfaces():
+    """Pin every V8 world/body/sensor/wrench conversion to one explicit contract."""
+    bridge = GZ_BRIDGE.read_text(encoding="utf-8")
+    bridge_contract = (
+        # Body vectors: Gazebo FLU -> PX4 FRD = diag(1, -1, -1).
+        "q_FLU_to_FRD = gz::math::Quaterniond(0, 1, 0, 0)",
+        # World vectors: Gazebo ENU -> PX4 NED = (y, x, -z).
+        "const matrix::Vector3d position{pose_position.y(), pose_position.x(), -pose_position.z()}",
+        # Attitude: compose the world and body transformations exactly once.
+        "q_FRD_to_NED = q_ENU_to_NED * q_FLU_to_ENU * q_FLU_to_FRD.Inverse()",
+        # Harmonic magnetic compatibility remains confined to this boundary.
+        "report.x = -msg.field_tesla().y()",
+        "report.y = -msg.field_tesla().x()",
+        # NavSat messages already expose semantic N/E/Up velocities.
+        "float vel_north = msg.velocity_north()",
+        "float vel_east = msg.velocity_east()",
+        "float vel_down = -msg.velocity_up()",
+    )
+    for item in bridge_contract:
+        if item not in bridge:
+            fail(f"missing Gazebo/PX4 bridge frame contract: {item}")
+
+    aero = AERO_SOURCE.read_text(encoding="utf-8")
+    aero_contract = (
+        "GzToFrd(const math::Vector3d &v) { return {v.X(), -v.Y(), -v.Z()}; }",
+        "std::atan2(velocity_frd.Z(),velocity_frd.X())",
+        "std::atan2(velocity_frd.Y(),std::hypot(velocity_frd.X(),velocity_frd.Z()))",
+        "const math::Vector3d force_gz=FrdToGz(force_frd)",
+        "const math::Vector3d moment_gz=FrdToGz(moment_frd)",
+        "Link(_link).AddWorldWrench(ecm,force_world,moment_world)",
+    )
+    for item in aero_contract:
+        if item not in aero:
+            fail(f"missing aerodynamic frame contract: {item}")
+
+    propulsion = PROPULSION_SOURCE.read_text(encoding="utf-8")
+    propulsion_contract = (
+        "_thrust_direction={std::cos(down_deg*kDegToRad),0.0,-std::sin(down_deg*kDegToRad)}",
+        "const math::Vector3d moment_gz=_engine_point.Cross(force_gz)+reaction_gz",
+        "Link(_link).AddWorldWrench(ecm,force_world,moment_world)",
+    )
+    for item in propulsion_contract:
+        if item not in propulsion:
+            fail(f"missing propulsion frame contract: {item}")
+
+    land = LAND_DETECTOR.read_text(encoding="utf-8")
+    fixedwing_land = FIXEDWING_LAND_DETECTOR.read_text(encoding="utf-8")
+    if "const bool at_rest = landDetected && _get_at_rest_state();" not in land:
+        fail("land detector must publish the vehicle-specific at-rest state")
+    for item in ("_get_horizontal_movement()", "> 0.5f",
+                 "LandDetector::_get_at_rest_state() && !_get_horizontal_movement()"):
+        if item not in fixedwing_land:
+            fail(f"missing fixed-wing rolling-state contract: {item}")
+
+
+def check_phase_pitch_contract():
+    """Keep takeoff, cruise and landing pitch authority explicitly separated."""
+    message = ATTITUDE_SETPOINT_MESSAGE.read_text(encoding="utf-8")
+    for item in (
+        "uint32 MESSAGE_VERSION = 1",
+        "uint8 FW_PITCH_MODE_NORMAL = 0",
+        "uint8 FW_PITCH_MODE_TAKEOFF = 1",
+        "uint8 FW_PITCH_MODE_LANDING = 2",
+        "float32 fw_pitch_limit_blend",
+    ):
+        if item not in message:
+            fail(f"missing phase-aware pitch message contract: {item}")
+
+    position = FW_POSITION_CONTROL.read_text(encoding="utf-8")
+    for item in (
+        "float smoothstep_transition(",
+        "updatePitchPhaseSchedule(_local_pos.timestamp)",
+        "updateLandingPitchSchedule(now, landing_height)",
+        "_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF",
+        "_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING",
+        "_pitch_takeoff_transition_start = now",
+        "_pitch_landing_transition_start = now",
+    ):
+        if item not in position:
+            fail(f"missing position-control phase/height contract: {item}")
+
+    attitude = FW_ATTITUDE_CONTROL.read_text(encoding="utf-8")
+    for item in (
+        "_att_sp.fw_pitch_limit_blend",
+        "_param_fw_p_rmax_tko",
+        "_param_fw_p_rmax_lnd",
+        "_param_fw_p_rmax_slew",
+    ):
+        if item not in attitude:
+            fail(f"missing attitude-control phase-limit contract: {item}")
+
+    rate = FW_RATE_CONTROL.read_text(encoding="utf-8")
+    for item in (
+        "_param_fw_pr_ff_lnd.get()",
+        "FW_PITCH_MODE_LANDING",
+        "_param_fw_pr_ff_rwto.get()",
+        "FW_PITCH_MODE_TAKEOFF",
+    ):
+        if item not in rate:
+            fail(f"missing rate-control phase feed-forward contract: {item}")
+
+
+def check_ulog_diagnostics():
+    cmake = MESSAGE_CMAKE.read_text(encoding="utf-8")
+    logger = LOGGER_TOPICS.read_text(encoding="utf-8")
+    bridge = GZ_BRIDGE.read_text(encoding="utf-8")
+    header = GZ_BRIDGE_HEADER.read_text(encoding="utf-8")
+    aero_message = AERO_MESSAGE.read_text(encoding="utf-8")
+    propulsion_message = PROPULSION_MESSAGE.read_text(encoding="utf-8")
+    analyzer = AERO_COEFFICIENT_ANALYZER.read_text(encoding="utf-8")
+    dynamic_acceptance = DYNAMIC_ACCEPTANCE.read_text(encoding="utf-8")
+
+    for item in ("HonghuV8AeroState.msg", "HonghuV8PropulsionState.msg"):
+        if item not in cmake:
+            fail(f"missing V8 diagnostic message registration: {item}")
+    for item in (
+        'add_optional_topic("honghu_v8_aero_state", 20)',
+        'add_optional_topic("honghu_v8_propulsion_state", 20)',
+    ):
+        if item not in logger:
+            fail(f"missing V8 diagnostic logger registration: {item}")
+    for item in (
+        'diagnostic_root + "/aero_state"',
+        'diagnostic_root + "/propulsion_state"',
+        "honghuAeroStateCallback",
+        "honghuPropulsionStateCallback",
+    ):
+        if item not in bridge and item not in header:
+            fail(f"missing Gazebo-to-uORB V8 diagnostic bridge contract: {item}")
+    for item in (
+        "float32[6] coefficients", "float32[8] joint_angles_deg",
+        "float32[4] delta_doc_deg", "uint32 sequence",
+    ):
+        if item not in aero_message:
+            fail(f"missing aerodynamic ULog field: {item}")
+    for item in ("float32 filtered_throttle", "float32 thrust_n", "float32 torque_nm"):
+        if item not in propulsion_message:
+            fail(f"missing propulsion ULog field: {item}")
+    for item in (
+        'optional_dataset(ulog, "estimator_sensor_bias")',
+        "vehicle_acceleration_frd + accel_bias_frd",
+        "--allow-estimator-biased-acceleration",
+        "M_aero = I*omega_dot + omega_cross_(I*omega) - M_propulsion",
+        'optional_dataset(ulog, "honghu_v8_aero_state")',
+        'optional_dataset(ulog, "honghu_v8_propulsion_state")',
+        "--allow-commanded-surface-fallback",
+        "document_deflections_from_joint_angles(theta_deg)",
+    ):
+        if item not in analyzer:
+            fail(f"missing aerodynamic coefficient-analysis contract: {item}")
+    for item in (
+        "class OfflineGazeboDiagnostics",
+        "self.aero.load(new_logs[-1], samples)",
+        "post-flight ULog only; no external Gazebo topic observers",
+    ):
+        if item not in dynamic_acceptance:
+            fail(f"missing offline dynamic-diagnostic contract: {item}")
+    if '["gz", "topic"' in dynamic_acceptance:
+        fail("dynamic acceptance must not spawn external Gazebo topic observers")
+
+
 def check_tables():
     static_dir = MODEL / "aero_tables"
     for path in static_dir.rglob("*.csv"):
@@ -340,6 +557,9 @@ def check_airframe():
         "PX4_GZ_HOME_HEADING=${PX4_GZ_HOME_HEADING:=0}",
         "PX4_GZ_SET_HOME_COORDINATES=${PX4_GZ_SET_HOME_COORDINATES:=1}",
         "PX4_GZ_MODEL_POSE=${PX4_GZ_MODEL_POSE:=0,0,0.5145,0,0,1.1349764}",
+        "PX4_GZ_MAG_FIELD_X=${PX4_GZ_MAG_FIELD_X:=-3.55621019e-06}",
+        "PX4_GZ_MAG_FIELD_Y=${PX4_GZ_MAG_FIELD_Y:=3.46940371e-05}",
+        "PX4_GZ_MAG_FIELD_Z=${PX4_GZ_MAG_FIELD_Z:=-3.25102706e-05}",
         "param set SIM_GZ_SV_ZMAP 1",
         "param set SIM_GZ_EC_MIN1 0",
         "param set SIM_GZ_EC_MAX1 1000",
@@ -357,23 +577,33 @@ def check_airframe():
         "param set SIM_GZ_SV_ZEROA9 0",
         "param set SIM_GZ_SV_MAXA9 -30",
         "param set FW_CANARD_NEUT   0.5",
-        "param set FW_CANARD_TO     0.266667",
+        "param set FW_CANARD_TO     0.4",
         "param set FW_CANARD_BRK    1.0",
         "param set RWTO_WHEEL_HGT 0.20",
-        "param set FW_P_LIM_MAX 8",
+        "param set FW_P_LIM_MAX 10",
+        "param set RWTO_PMAX 8",
+        "param set FW_LND_PMAX 8",
+        "param set FW_P_TKO_HGT 50",
+        "param set FW_P_LND_HGT 50",
+        "param set FW_P_TRANS_DUR 5",
         "param set FW_PR_FF_RWTO 6.6",
+        "param set FW_PR_FF_LND 6.6",
         "param set FW_PR_RWTO_Q 2.0",
-        "param set FW_P_RMAX_POS 6",
-        "param set TRIM_PITCH 0.03",
+        "param set FW_P_RMAX_POS 10",
+        "param set FW_P_RMAX_TKO 6",
+        "param set FW_P_RMAX_LND 6",
+        "param set FW_P_RMAX_SLEW 2",
+        "param set TRIM_PITCH -0.02",
         "param set FW_PR_P 0.40",
         "param set FW_PR_D 0.10",
-        "param set FW_PR_FF 0.75",
+        "param set FW_PR_FF 0.90",
+        "param set RWTO_ROT_TIME 6.0",
         "param set FW_PR_I 0.04",
         "param set FW_PR_IMAX 0.12",
         "param set FW_P_TC 0.8",
         "param set FW_P_RMAX_NEG 10",
         "param set FW_T_I_GAIN_PIT 0.05",
-        "param set FW_T_PTCH_DAMP 0.15",
+        "param set FW_T_PTCH_DAMP 0.30",
         "param set FW_T_ALT_TC 3.5",
         "param set FW_T_RLL2THR 20",
         "param set FW_RR_P 0.26",
@@ -421,25 +651,31 @@ def check_geographic_origin():
     close(float(world.findtext("./world/spherical_coordinates/elevation")),
           0.0, label="V8 world elevation")
     magnetic_field = [float(value) for value in world.findtext("./world/magnetic_field").split()]
-    expected_field = (6e-06, 2.3e-05, -4.2e-05)
+    expected_field = (-3.55621019e-06, 3.46940371e-05, -3.25102706e-05)
     for index, expected in enumerate(expected_field):
         close(magnetic_field[index], expected, tol=1e-12,
-              label=f"V8 world Gazebo-8-compatible magnetic field[{index}]")
-    plane_sizes = [
-        tuple(float(value) for value in element.text.split())
-        for element in (
-            world.findall("./world/model[@name='ground_plane']/link/collision/geometry/plane/size")
-            + world.findall("./world/model[@name='ground_plane']/link/visual/geometry/plane/size")
-        )
-    ]
-    if plane_sizes != [(30000.0, 30000.0), (30000.0, 30000.0)]:
-        fail(f"V8 world ground size mismatch: {plane_sizes}")
+              label=f"V8 world local WMM ENU magnetic field[{index}]")
+    ground_collision = world.find("./world/model[@name='ground_plane']/link/collision")
+    ground_box = world.find("./world/model[@name='ground_plane']/link/collision/geometry/box/size")
+    ground_visual = world.find("./world/model[@name='ground_plane']/link/visual/geometry/plane/size")
+    if ground_collision is None or ground_box is None or ground_visual is None:
+        fail("V8 ground must use a finite collision box and a plane visual")
+    ground_box_size = tuple(float(value) for value in ground_box.text.split())
+    ground_visual_size = tuple(float(value) for value in ground_visual.text.split())
+    ground_collision_pose = tuple(float(value) for value in ground_collision.findtext("pose").split())
+    if ground_box_size != (30000.0, 30000.0, 1.0):
+        fail(f"V8 ground collision box size mismatch: {ground_box_size}")
+    if ground_visual_size != (30000.0, 30000.0):
+        fail(f"V8 ground visual size mismatch: {ground_visual_size}")
+    if ground_collision_pose != (0.0, 0.0, -0.5, 0.0, 0.0, 0.0):
+        fail(f"V8 ground collision top is not aligned with z=0: {ground_collision_pose}")
 
     gz_init = GZ_INIT.read_text(encoding="utf-8")
     for item in ("/set_spherical_coordinates", "gz.msgs.SphericalCoordinates",
                  "latitude_deg: ${PX4_GZ_HOME_LAT}",
                  "longitude_deg: ${PX4_GZ_HOME_LON}",
                  "PX4_GZ_SET_HOME_COORDINATES:-1",
+                 "magnetic_field: {x: ${PX4_GZ_MAG_FIELD_X}",
                  "orientation: { x: ${quat_x}",
                  "Spawning model at pose"):
         if item not in gz_init:
@@ -460,6 +696,9 @@ def main():
     check_mass_and_inertia(root, gen)
     check_sdf_contract(root, gen)
     check_control_signs()
+    check_frame_interfaces()
+    check_phase_pitch_contract()
+    check_ulog_diagnostics()
     check_tables()
     aero_report = audit_model(HonghuV8AeroModel())
     check_servo_bridge()
@@ -468,8 +707,11 @@ def main():
     print("Honghu V8 static contract: PASS")
     print("  mass=150 kg, CG=base_link, target FLU inertia closed")
     print("  control signs: positive delta_doc produces the required FRD/FLU moments")
-    print("  rigid rolling-wheel contact, stable joint-controller parameters, 4028 and legacy bridge mapping verified")
-    print("  WGS84 origin, Gazebo-8-compatible magnetic field, 30 km ground and mission-aligned spawn verified")
+    print("  world ENU/NED, body FLU/FRD, sensor, aerodynamic and propulsion interfaces verified")
+    print("  takeoff/cruise/landing pitch authority and height-triggered time transitions verified")
+    print("  V8 actual-joint / propulsion uORB logging and coefficient-analysis contracts verified")
+    print("  rigid rolling-wheel contact, bounded joint-controller parameters, 4028 and legacy bridge mapping verified")
+    print("  WGS84 origin, exact V8 3D magnetometer adapter, 30 km ground and mission-aligned spawn verified")
     print(f"  aerodynamic truth model: PASS ({aero_report['checks']} table/sign/continuity/trim checks)")
 
 

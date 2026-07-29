@@ -72,7 +72,12 @@ FixedwingAttitudeControl::parameters_update()
 	_roll_ctrl.set_max_rate(radians(_param_fw_r_rmax.get()));
 
 	_pitch_ctrl.set_time_constant(_param_fw_p_tc.get());
-	_pitch_ctrl.set_max_rate_pos(radians(_param_fw_p_rmax_pos.get()));
+
+	if (!PX4_ISFINITE(_pitch_rate_limit_pos_current)) {
+		_pitch_rate_limit_pos_current = radians(_param_fw_p_rmax_pos.get());
+	}
+
+	_pitch_ctrl.set_max_rate_pos(_pitch_rate_limit_pos_current);
 	_pitch_ctrl.set_max_rate_neg(radians(_param_fw_p_rmax_neg.get()));
 
 	_yaw_ctrl.set_max_rate(radians(_param_fw_y_rmax.get()));
@@ -83,6 +88,42 @@ FixedwingAttitudeControl::parameters_update()
 	_wheel_ctrl.set_integrator_max(_param_fw_wr_imax.get());
 	_wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
 	_wheel_ctrl.set_time_constant(_param_fw_w_tc.get());
+}
+
+void FixedwingAttitudeControl::update_pitch_rate_limit(const float dt)
+{
+	const float cruise_limit = radians(_param_fw_p_rmax_pos.get());
+	float phase_limit = cruise_limit;
+
+	if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF
+	    && _param_fw_p_rmax_tko.get() >= 0.f) {
+		phase_limit = radians(_param_fw_p_rmax_tko.get());
+
+	} else if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING
+		   && _param_fw_p_rmax_lnd.get() >= 0.f) {
+		phase_limit = radians(_param_fw_p_rmax_lnd.get());
+	}
+
+	const float phase_blend = math::constrain(_att_sp.fw_pitch_limit_blend, 0.f, 1.f);
+	const float target_limit = cruise_limit + phase_blend * (phase_limit - cruise_limit);
+
+	if (!PX4_ISFINITE(_pitch_rate_limit_pos_current)) {
+		_pitch_rate_limit_pos_current = target_limit;
+	}
+
+	const float slew_rate = radians(_param_fw_p_rmax_slew.get());
+
+	if (slew_rate > FLT_EPSILON) {
+		const float max_change = slew_rate * dt;
+		_pitch_rate_limit_pos_current = math::constrain(target_limit,
+					_pitch_rate_limit_pos_current - max_change,
+					_pitch_rate_limit_pos_current + max_change);
+
+	} else {
+		_pitch_rate_limit_pos_current = target_limit;
+	}
+
+	_pitch_ctrl.set_max_rate_pos(_pitch_rate_limit_pos_current);
 }
 
 void
@@ -110,6 +151,8 @@ FixedwingAttitudeControl::vehicle_manual_poll(const float yaw_body)
 				q.copyTo(_att_sp.q_d);
 
 				_att_sp.reset_integral = false;
+				_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_NORMAL;
+				_att_sp.fw_pitch_limit_blend = 0.f;
 
 				_att_sp.timestamp = hrt_absolute_time();
 
@@ -258,6 +301,7 @@ void FixedwingAttitudeControl::Run()
 		vehicle_manual_poll(euler_angles.psi());
 
 		vehicle_attitude_setpoint_poll();
+		update_pitch_rate_limit(dt);
 
 		// vehicle status update must be before the vehicle_control_mode poll, otherwise rate sp are not published during whole transition
 		_vehicle_status_sub.update(&_vehicle_status);

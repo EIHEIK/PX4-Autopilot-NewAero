@@ -23,6 +23,14 @@ if [ "$(printf '%s\n' "$GZ_SIM_VERSION" "$MIN_GZ_VERSION" | sort -V | head -n1)"
 		echo "INFO  [init] Setting Gazebo render engine to '${PX4_GZ_SIM_RENDER_ENGINE}'!"
 		gz_sub_command="${gz_sub_command} --render-engine ${PX4_GZ_SIM_RENDER_ENGINE}"
 	fi
+
+	# Optional physics-engine selection for isolated model validation.  Gazebo
+	# retains its default DART backend unless an airframe or test explicitly
+	# supplies a plugin name such as gz-physics-bullet-featherstone-plugin.
+	if [ -n "${PX4_GZ_PHYSICS_ENGINE}" ]; then
+		echo "INFO  [init] Setting Gazebo physics engine to '${PX4_GZ_PHYSICS_ENGINE}'!"
+		gz_sub_command="${gz_sub_command} --physics-engine ${PX4_GZ_PHYSICS_ENGINE}"
+	fi
 else
     echo "ERROR [init] Gazebo gz sim version is too old ($GZ_SIM_VERSION). Minimum required version is $MIN_GZ_VERSION"
     exit 1
@@ -134,9 +142,14 @@ fi
 if [ -n "${PX4_GZ_MAX_STEP_SIZE}" ]; then
 	echo "INFO  [init] Setting Gazebo max step size: ${PX4_GZ_MAX_STEP_SIZE} s"
 	PHYSICS_UPDATE_RATE=$(awk "BEGIN { print 1.0 / ${PX4_GZ_MAX_STEP_SIZE} }")
+	# Keep the existing generic Gazebo field unless an airframe explicitly
+	# supplies a local WMM vector.  Gazebo expects world ENU tesla here.
+	PX4_GZ_MAG_FIELD_X=${PX4_GZ_MAG_FIELD_X:=0.000006}
+	PX4_GZ_MAG_FIELD_Y=${PX4_GZ_MAG_FIELD_Y:=0.000023}
+	PX4_GZ_MAG_FIELD_Z=${PX4_GZ_MAG_FIELD_Z:=-0.000042}
 	PHYSICS_RESULT=$(${gz_command} service -s "/world/${PX4_GZ_WORLD}/set_physics" --reqtype gz.msgs.Physics \
 			--reptype gz.msgs.Boolean --timeout 5000 \
-			--req "max_step_size: ${PX4_GZ_MAX_STEP_SIZE}, real_time_factor: 1.0, real_time_update_rate: ${PHYSICS_UPDATE_RATE}, enable_physics: true, gravity: {x: 0, y: 0, z: -9.8}, magnetic_field: {x: 0.000006, y: 0.000023, z: -0.000042}" 2>&1)
+			--req "max_step_size: ${PX4_GZ_MAX_STEP_SIZE}, real_time_factor: 1.0, real_time_update_rate: ${PHYSICS_UPDATE_RATE}, enable_physics: true, gravity: {x: 0, y: 0, z: -9.8}, magnetic_field: {x: ${PX4_GZ_MAG_FIELD_X}, y: ${PX4_GZ_MAG_FIELD_Y}, z: ${PX4_GZ_MAG_FIELD_Z}}" 2>&1)
 
 	if ! echo "${PHYSICS_RESULT}" | grep -q "data: true"; then
 		echo "ERROR [init] Failed to set Gazebo max step size: ${PHYSICS_RESULT}"

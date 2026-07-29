@@ -243,6 +243,23 @@ PARAM_DEFINE_FLOAT(FW_PR_FF, 0.5f);
 PARAM_DEFINE_FLOAT(FW_PR_FF_RWTO, -1.0f);
 
 /**
+ * Landing-flare pitch rate feed forward
+ *
+ * Pitch-rate feed-forward used only while the fixed-wing landing controller
+ * has enabled wheel steering / flare control. This separates landing flare
+ * authority from FW_PR_FF_RWTO. A negative value disables the landing-specific
+ * path and preserves the normal FW_PR_FF behavior.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_FF_LND, -1.0f);
+
+/**
  * Runway-rotation breakaway release rate
  *
  * Measured positive pitch rate at which FW_PR_FF_RWTO has been completely

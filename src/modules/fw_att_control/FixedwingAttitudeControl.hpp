@@ -128,6 +128,7 @@ private:
 
 	bool _landed{true};
 	float _groundspeed{0.f};
+	float _pitch_rate_limit_pos_current{NAN};
 	bool _in_fw_or_transition_wo_tailsitter_transition{false}; // only run the FW attitude controller in these states
 
 	DEFINE_PARAMETERS(
@@ -142,6 +143,9 @@ private:
 
 		(ParamFloat<px4::params::FW_P_RMAX_NEG>) _param_fw_p_rmax_neg,
 		(ParamFloat<px4::params::FW_P_RMAX_POS>) _param_fw_p_rmax_pos,
+		(ParamFloat<px4::params::FW_P_RMAX_TKO>) _param_fw_p_rmax_tko,
+		(ParamFloat<px4::params::FW_P_RMAX_LND>) _param_fw_p_rmax_lnd,
+		(ParamFloat<px4::params::FW_P_RMAX_SLEW>) _param_fw_p_rmax_slew,
 		(ParamFloat<px4::params::FW_P_TC>) _param_fw_p_tc,
 		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
 
@@ -171,5 +175,6 @@ private:
 	void vehicle_manual_poll(const float yaw_body);
 	void vehicle_attitude_setpoint_poll();
 	void vehicle_land_detected_poll();
+	void update_pitch_rate_limit(float dt);
 	float get_airspeed_constrained();
 };

@@ -24,8 +24,8 @@ def read_frame(topic: str) -> list[float]:
     )
     message = json.loads(process.stdout.strip())
     data = message["data"]
-    if len(data) != 76:
-        raise RuntimeError(f"expected 76 aero_state values, got {len(data)}")
+    if len(data) < 76:
+        raise RuntimeError(f"expected at least 76 aero_state values, got {len(data)}")
     return data
 
 
@@ -73,6 +73,8 @@ def compare(data: list[float], tolerance: float) -> dict:
         "maximum_absolute_error": maximum,
         "tolerance": tolerance,
         "flags": int(data[75]),
+        "source_time_us": data[76] if len(data) >= 78 else None,
+        "sequence": int(data[77]) if len(data) >= 78 else None,
         "errors": errors,
     }
 

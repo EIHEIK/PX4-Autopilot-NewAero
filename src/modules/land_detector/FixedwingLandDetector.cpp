@@ -163,4 +163,19 @@ bool FixedwingLandDetector::_get_landed_state()
 	return landDetected;
 }
 
+bool FixedwingLandDetector::_get_horizontal_movement()
+{
+	// The generic at-rest detector relies on real IMU vibration. A perfectly
+	// smooth SITL runway can therefore look stationary even while a fixed-wing
+	// aircraft is rolling. Ground speed is the unambiguous fixed-wing fallback.
+	return hrt_elapsed_time(&_vehicle_local_position.timestamp) < 1_s
+	       && _vehicle_local_position.v_xy_valid
+	       && matrix::Vector2f(_vehicle_local_position.vx, _vehicle_local_position.vy).norm() > 0.5f;
+}
+
+bool FixedwingLandDetector::_get_at_rest_state()
+{
+	return LandDetector::_get_at_rest_state() && !_get_horizontal_movement();
+}
+
 } // namespace land_detector

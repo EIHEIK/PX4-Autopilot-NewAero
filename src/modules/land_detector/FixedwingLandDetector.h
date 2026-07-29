@@ -62,6 +62,8 @@ public:
 protected:
 
 	bool _get_landed_state() override;
+	bool _get_horizontal_movement() override;
+	bool _get_at_rest_state() override;
 	void _set_hysteresis_factor(const int factor) override {};
 
 private:

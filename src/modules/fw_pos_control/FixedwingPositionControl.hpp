@@ -345,6 +345,14 @@ private:
 
 	bool _skipping_takeoff_detection{false};
 
+	// Height only triggers a phase change. Once triggered, pitch authority
+	// changes with elapsed time and no longer follows every height sample.
+	bool _pitch_takeoff_schedule_active{false};
+	bool _pitch_takeoff_release_complete{false};
+	float _pitch_takeoff_reference_alt{NAN};
+	hrt_abstime _pitch_takeoff_transition_start{0};
+	hrt_abstime _pitch_landing_transition_start{0};
+
 	// Independent ground taxi test state
 	struct GroundTaxiRoutePoint {
 		Vector2f local_pos{};
@@ -602,6 +610,18 @@ private:
 	 * @param now Current system time [us]
 	 */
 	void update_in_air_states(const hrt_abstime now);
+
+	/** Update the takeoff/cruise pitch phase schedule. */
+	void updatePitchPhaseSchedule(const hrt_abstime now);
+
+	/** Start or advance the landing transition after its height trigger. */
+	void updateLandingPitchSchedule(const hrt_abstime now, float height_above_landing_surface);
+
+	/** Reset all persistent pitch phase triggers for a new flight. */
+	void resetPitchPhaseSchedule();
+
+	/** Active positive pitch-angle limit selected by phase and transition weight. */
+	float getActivePitchMax() const;
 
 	/**
 	 * @brief Moves the current position setpoint to a value far ahead of the current vehicle yaw when in  a VTOL
@@ -1046,6 +1066,7 @@ private:
 
 		(ParamFloat<px4::params::FW_LND_AIRSPD>) _param_fw_lnd_airspd,
 		(ParamFloat<px4::params::FW_LND_ANG>) _param_fw_lnd_ang,
+		(ParamFloat<px4::params::FW_LND_PMAX>) _param_fw_lnd_pmax,
 		(ParamFloat<px4::params::FW_LND_FL_PMAX>) _param_fw_lnd_fl_pmax,
 		(ParamFloat<px4::params::FW_LND_FL_PMIN>) _param_fw_lnd_fl_pmin,
 		(ParamFloat<px4::params::FW_LND_FLALT>) _param_fw_lnd_flalt,
@@ -1056,6 +1077,10 @@ private:
 
 		(ParamFloat<px4::params::FW_P_LIM_MAX>) _param_fw_p_lim_max,
 		(ParamFloat<px4::params::FW_P_LIM_MIN>) _param_fw_p_lim_min,
+		(ParamFloat<px4::params::FW_P_TKO_HGT>) _param_fw_p_tko_hgt,
+		(ParamFloat<px4::params::FW_P_LND_HGT>) _param_fw_p_lnd_hgt,
+		(ParamFloat<px4::params::FW_P_TRANS_DUR>) _param_fw_p_trans_dur,
+		(ParamFloat<px4::params::RWTO_PMAX>) _param_rwto_pmax,
 
 		(ParamFloat<px4::params::FW_T_HRATE_FF>) _param_fw_t_hrate_ff,
 		(ParamFloat<px4::params::FW_T_ALT_TC>) _param_fw_t_h_error_tc,

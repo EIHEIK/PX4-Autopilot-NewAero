@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <sdf version="1.9">
+  <!-- ISOLATED XIANGYI TEST DERIVATIVE: total mass 100 kg; V8/PDF inertia
+       retained as an explicit assumption; +X FRD reaction-torque A/B case.
+       Generated from the stable 150 kg model; never edit it as production. -->
   <!-- V8 coordinate contract: model/base_link is Gazebo FLU at assembled CG.
        PDF/PX4 FRD vectors convert with diag(1,-1,-1).
        Meshes are CAD/nose-origin assets translated +1.57 m into the CG frame. -->
-  <model name="honghu_wing_150kg_v8">
+  <model name="honghu_wing_100kg_v8_xiangyi_test">
     <pose>0 0 0.5145 0 0 0</pose>
     <static>false</static>
     <self_collide>false</self_collide>
@@ -11,7 +14,7 @@
       <gravity>true</gravity>
       <inertial>
         <pose>-0.00135832395 -0 0.00161090373 0 0 0</pose>
-        <mass>149.16</mass>
+        <mass>99.16</mass>
         <inertia>
           <ixx>25.3996217758</ixx><ixy>0.017</ixy><ixz>3.47710415849</ixz>
           <iyy>38.5152185909</iyy><iyz>-0.0019</iyz><izz>58.3130652536</izz>
@@ -23,12 +26,12 @@
           <friction><ode><mu>0.4</mu><mu2>0.4</mu2></ode></friction></surface>
       </collision>
       <visual name="body_visual">
-        <pose>1.57 0 0 0 0 0</pose><geometry><mesh><uri>meshes/body.dae</uri></mesh></geometry>
+        <pose>1.57 0 0 0 0 0</pose><geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/body.dae</uri></mesh></geometry>
         <material><ambient>0.175 0.175 0.175 1</ambient><diffuse>0.175 0.175 0.175 1</diffuse></material>
       </visual>
       <visual name="propeller_visual">
         <pose>-1.23 0 0.12 0 1.57079632679 0</pose>
-        <geometry><mesh><scale>0.33 0.33 0.33</scale><uri>meshes/propeller_ccw.dae</uri></mesh></geometry>
+        <geometry><mesh><scale>0.33 0.33 0.33</scale><uri>model://honghu_wing_150kg_v8/meshes/propeller_ccw.dae</uri></mesh></geometry>
       </visual>
 
       <sensor name="imu_sensor" type="imu">
@@ -50,9 +53,14 @@
         <always_on>1</always_on><update_rate>50</update_rate>
         <air_pressure><pressure><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></pressure></air_pressure>
       </sensor>
-      <!-- V8 uses HonghuMagnetometerV8 below instead of Harmonic's historical
-           NED/ENU compatibility path. The custom publisher retains the topic
-           expected by the unchanged PX4 bridge. -->
+      <sensor name="magnetometer_sensor" type="magnetometer">
+        <always_on>1</always_on><update_rate>100</update_rate>
+        <magnetometer>
+          <x><noise type="gaussian"><stddev>0.0001</stddev></noise></x>
+          <y><noise type="gaussian"><stddev>0.0001</stddev></noise></y>
+          <z><noise type="gaussian"><stddev>0.0001</stddev></noise></z>
+        </magnetometer>
+      </sensor>
       <sensor name="navsat_sensor" type="navsat"><always_on>1</always_on><update_rate>30</update_rate></sensor>
     </link>
 
@@ -69,7 +77,7 @@
       </inertial>
       <visual name="left_aileron_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/left_aileron.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/left_aileron.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -97,7 +105,7 @@
       </inertial>
       <visual name="right_aileron_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/right_aileron.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/right_aileron.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -125,7 +133,7 @@
       </inertial>
       <visual name="left_elevator_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/left_elevator.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/left_elevator.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -153,7 +161,7 @@
       </inertial>
       <visual name="right_elevator_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/right_elevator.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/right_elevator.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -181,7 +189,7 @@
       </inertial>
       <visual name="left_rudder_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/left_rudder.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/left_rudder.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -209,7 +217,7 @@
       </inertial>
       <visual name="right_rudder_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/right_rudder.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/right_rudder.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -237,7 +245,7 @@
       </inertial>
       <visual name="left_canard_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/left_canard.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/left_canard.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -265,7 +273,7 @@
       </inertial>
       <visual name="right_canard_visual">
         <pose>1.57 0 0 0 0 0</pose>
-        <geometry><mesh><uri>meshes/right_canard.dae</uri></mesh></geometry>
+        <geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/right_canard.dae</uri></mesh></geometry>
         <material><ambient>0.8 0.05 0.05 1</ambient><diffuse>0.8 0.05 0.05 1</diffuse></material>
       </visual>
     </link>
@@ -297,7 +305,7 @@
           <iyy>0.000353</iyy><iyz>0</iyz><izz>0.000364</izz>
         </inertia>
       </inertial>
-      <visual name="wheel_visual"><pose>1.861274 -0.524303 0.4551 0 0 0</pose><geometry><mesh><uri>meshes/left_backwheel.dae</uri></mesh></geometry></visual>
+      <visual name="wheel_visual"><pose>1.861274 -0.524303 0.4551 0 0 0</pose><geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/left_backwheel.dae</uri></mesh></geometry></visual>
       <collision name="left_main_wheel_collision">
         <pose>0 0 0 1.57079632679 0 0</pose>
         <geometry><cylinder><radius>0.0594</radius><length>0.1060</length></cylinder></geometry>
@@ -327,7 +335,7 @@
           <iyy>0.000353</iyy><iyz>0</iyz><izz>0.000364</izz>
         </inertia>
       </inertial>
-      <visual name="wheel_visual"><pose>1.861274 0.524303 0.4551 0 0 0</pose><geometry><mesh><uri>meshes/right_backwheel.dae</uri></mesh></geometry></visual>
+      <visual name="wheel_visual"><pose>1.861274 0.524303 0.4551 0 0 0</pose><geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/right_backwheel.dae</uri></mesh></geometry></visual>
       <collision name="right_main_wheel_collision">
         <pose>0 0 0 1.57079632679 0 0</pose>
         <geometry><cylinder><radius>0.0594</radius><length>0.1060</length></cylinder></geometry>
@@ -375,7 +383,7 @@
           <iyy>0.000145</iyy><iyz>0</iyz><izz>0.000304</izz>
         </inertia>
       </inertial>
-      <visual name="wheel_visual"><pose>0.645148 0 0.457844 0 0 0</pose><geometry><mesh><uri>meshes/steeringwheel.dae</uri></mesh></geometry></visual>
+      <visual name="wheel_visual"><pose>0.645148 0 0.457844 0 0 0</pose><geometry><mesh><uri>model://honghu_wing_150kg_v8/meshes/steeringwheel.dae</uri></mesh></geometry></visual>
       <collision name="nose_wheel_collision">
         <pose>0 0 0 1.57079632679 0 0</pose>
         <geometry><cylinder><radius>0.0439</radius><length>0.1363</length></cylinder></geometry>
@@ -450,15 +458,9 @@
     <plugin filename="libHonghuPropulsionV8.so" name="honghu::v8::HonghuPropulsionV8">
       <link_name>base_link</link_name><table_dir>model://honghu_wing_150kg_v8/propulsion_tables</table_dir>
       <engine_point>-1.23 0 0.12</engine_point><thrust_down_deg>3</thrust_down_deg>
-      <!-- Front-view CCW propeller: omega is +X, airframe reaction torque is -X. -->
-      <propeller_rotation_sign>1</propeller_rotation_sign>
+      <!-- Xiangyi-log A/B hypothesis only: airframe reaction torque is +X FRD. -->
+      <propeller_rotation_sign>-1</propeller_rotation_sign>
       <tau_up_s>0.5</tau_up_s><tau_down_s>0.3</tau_down_s><reference_altitude_m>0</reference_altitude_m>
-    </plugin>
-    <plugin filename="libHonghuMagnetometerV8.so" name="honghu::v8::HonghuMagnetometerV8">
-      <link_name>base_link</link_name>
-      <!-- PX4 WMM-2020 at 28.5712315 N, 121.5759172 E, FRD/NED gauss. -->
-      <field_ned_gauss>0.346940371 -0.035562102 0.325102706</field_ned_gauss>
-      <update_rate_hz>100</update_rate_hz><noise_stddev_gauss>0.0001</noise_stddev_gauss>
     </plugin>
   </model>
 </sdf>

@@ -83,6 +83,53 @@ PARAM_DEFINE_FLOAT(FW_P_TC, 0.4f);
 PARAM_DEFINE_FLOAT(FW_P_RMAX_POS, 60.0f);
 
 /**
+ * Maximum positive pitch rate during runway takeoff
+ *
+ * A negative value uses FW_P_RMAX_POS. A non-negative value is blended with
+ * the cruise limit using the height-dependent phase value published by fixed-
+ * wing position control.
+ *
+ * @unit deg/s
+ * @min -1.0
+ * @max 180
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_RMAX_TKO, -1.0f);
+
+/**
+ * Maximum positive pitch rate during low-height landing
+ *
+ * A negative value uses FW_P_RMAX_POS. A non-negative value is blended with
+ * the cruise limit using the height-dependent landing phase value.
+ *
+ * @unit deg/s
+ * @min -1.0
+ * @max 180
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_RMAX_LND, -1.0f);
+
+/**
+ * Pitch-rate limit transition slew rate
+ *
+ * Limits how quickly the active positive pitch-rate limit changes when moving
+ * between takeoff, cruise and landing. Zero preserves the legacy immediate
+ * parameter behavior.
+ *
+ * @unit deg/s^2
+ * @min 0.0
+ * @max 180
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_RMAX_SLEW, 0.0f);
+
+/**
  * Maximum negative / down pitch rate setpoint
  *
  * @unit deg/s

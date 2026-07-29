@@ -321,7 +321,10 @@ private:
     {
         const double now=std::chrono::duration<double>(info.simTime).count();
         if (now<_next_publish) { return; }
-        _next_publish=now+0.01;
+        // Diagnostics are flight-recorder inputs, not part of the force path.
+        // 50 Hz resolves the 4 rad/s control-surface motion while keeping the
+        // transport and ULog load well below the former 100 Hz stream.
+        _next_publish=now+0.02;
         msgs::Double_V state;
         for (double value : {speed,alpha,beta,rho,_alpha_dot,_beta_dot,omega_frd.X(),omega_frd.Y(),omega_frd.Z(),
                              c.CL,c.CD,c.CY,c.Cl,c.Cm,c.Cn}) { state.add_data(value); }
@@ -334,6 +337,10 @@ private:
             state.add_data(axis.X()); state.add_data(axis.Y()); state.add_data(axis.Z());
         }
         state.add_data(static_cast<double>(flags));
+        // Preserve source simulation time.  The Gazebo bridge must not stamp a
+        // queued sample with its later callback-arrival time.
+        state.add_data(now*1e6);
+        state.add_data(static_cast<double>(_diagnostic_sequence++));
         _diag_pub.Publish(state);
 
         msgs::Vector3d force_frd_msg,moment_frd_msg,force_gz_msg,moment_gz_msg;
@@ -347,6 +354,7 @@ private:
     std::array<math::Vector3d,8> _joint_axes{}; std::string _link_name;
     bool _valid{false},_have_angles{false}; double _area{2.42},_span{3.96},_mac{0.62},_reference_altitude{0.0};
     double _previous_alpha{0.0},_previous_beta{0.0},_alpha_dot{0.0},_beta_dot{0.0},_next_publish{0.0};
+    uint32_t _diagnostic_sequence{0};
     Grid2D _cl,_cd,_cy,_roll,_pitch,_yaw;
     Grid2D _canard_cl,_canard_cd,_canard_cm,_elevator_cl,_elevator_cd,_elevator_cm;
     Grid2D _aileron_cd,_aileron_cy,_aileron_cl,_aileron_cn,_rudder_cd,_rudder_cy,_rudder_cl,_rudder_cn;

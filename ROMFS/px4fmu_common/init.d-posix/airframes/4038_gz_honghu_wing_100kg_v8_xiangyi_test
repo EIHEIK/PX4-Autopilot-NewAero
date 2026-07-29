@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# @name Honghu Wing V8 Xiangyi 100 kg Isolated Test
+#
+# @type Plane with Canards
+# @class Plane
+#
+# @output Motor1 throttle
+# @output Servo1 left aileron
+# @output Servo2 right aileron
+# @output Servo3 left elevator
+# @output Servo4 right elevator
+# @output Servo5 left rudder
+# @output Servo6 right rudder
+# @output Servo7 left canard
+# @output Servo8 right canard
+# @output Servo9 nose wheel steering
+#
+# Test-only derivative of 4028. It deliberately sources the validated 150 kg
+# control/channel baseline, then applies only Xiangyi-condition overrides.
+# Do not use this airframe as the production Honghu V8 baseline.
+
+PX4_SIM_MODEL=honghu_wing_100kg_v8_xiangyi_test
+
+. ${R}etc/init.d-posix/airframes/4028_gz_honghu_wing_150kg_v8
+
+# Xiangyi's confirmed simulation mass is 100 kg. The square-root mass scaling
+# from the validated 150 kg V8 predicts a 35.9 m/s lift-off condition.
+param set FW_AIRSPD_STALL 24.5
+param set FW_AIRSPD_MIN 26.0
+param set FW_AIRSPD_TRIM 45.0
+param set FW_AIRSPD_MAX 55.0
+param set FW_TKO_AIRSPD 35.0
+param set RWTO_ROT_AIRSPD 30.0
+
+# Xiangyi's two complete flights hold the canard close to +6 deg. V8's joint
+# mapping uses +15 deg at a normalized takeoff command of 1.
+param set FW_CANARD_TO 0.4
+
+# The 100 kg plant must not inherit the 150 kg pitch-rate derivative gain
+# unchanged. Repeated flight and full-route ULogs showed that FW_PR_D=0.10
+# created a 3.86 Hz D-term / elevator limit cycle, while 0.03 removed it
+# without changing the takeoff or altitude envelope. The trim below transfers
+# the measured steady moment from the rate integrator into feed-forward:
+# FW_PR_I remains enabled and retains roughly 0.08 normalized units of
+# bidirectional authority instead of sitting at the -0.12 limit.
+param set FW_PR_D 0.03
+param set TRIM_PITCH -0.09
+# Keep the 100 kg full-route TECS setting used by the accepted isolated
+# experiments; the production 150 kg airframe has its own validated 0.30 value.
+param set FW_T_PTCH_DAMP 0.15

@@ -7,8 +7,10 @@
       <real_time_update_rate>250</real_time_update_rate>
     </physics>
     <gravity>0 0 -9.8</gravity>
-    <!-- Gazebo Sim 8 magnetometer-compatible baseline field. -->
-    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <!-- PX4 WMM-2020 at 28.5712315 N, 121.5759172 E, expressed in Gazebo ENU
+         [east, north, up] tesla.  The V8 airframe exports the same vector for
+         the runtime set_physics request used when changing the step size. -->
+    <magnetic_field>-3.55621019e-06 3.46940371e-05 -3.25102706e-05</magnetic_field>
     <atmosphere type="adiabatic"/>
     <scene>
       <grid>false</grid>
@@ -20,11 +22,14 @@
       <static>true</static>
       <link name="link">
         <collision name="collision">
+          <!-- DART / FCL represents an infinite plane with a bounded broadphase
+               proxy, so increasing plane/size changed the visual extent but
+               still allowed the aircraft to fall through beyond about 1 km
+               in Gazebo Y.  Use an explicit finite solid whose top is z=0;
+               its AABB now matches the advertised 30 km ground coverage. -->
+          <pose>0 0 -0.5 0 0 0</pose>
           <geometry>
-            <plane>
-              <normal>0 0 1</normal>
-              <size>30000 30000</size>
-            </plane>
+            <box><size>30000 30000 1</size></box>
           </geometry>
           <surface>
             <friction>

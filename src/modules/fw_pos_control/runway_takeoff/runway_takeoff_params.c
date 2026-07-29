@@ -383,6 +383,21 @@ PARAM_DEFINE_FLOAT(RWTO_ROT_AIRSPD, -1.0f);
 PARAM_DEFINE_FLOAT(RWTO_ROT_TIME, 1.0f);
 
 /**
+ * Maximum pitch during runway takeoff
+ *
+ * A negative value uses FW_P_LIM_MAX. A non-negative value is active near the
+ * runway and is continuously released with height by FW_P_TKO_HGT.
+ *
+ * @unit deg
+ * @min -1.0
+ * @max 45.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Runway Takeoff
+ */
+PARAM_DEFINE_FLOAT(RWTO_PMAX, -1.0f);
+
+/**
  * Height to keep nose-wheel yaw control after rotation starts
  *
  * A positive value keeps wheel yaw control active through CLIMBOUT until the

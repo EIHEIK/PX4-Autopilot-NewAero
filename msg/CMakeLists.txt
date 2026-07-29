@@ -112,6 +112,8 @@ set(msg_files
 	Gripper.msg
 	HealthReport.msg
 	HeaterStatus.msg
+	HonghuV8AeroState.msg
+	HonghuV8PropulsionState.msg
 	HoverThrustEstimate.msg
 	InputRc.msg
 	InternalCombustionEngineControl.msg

@@ -29,3 +29,11 @@ The resulting ULog reports `SYS_AUTOCONFIG=0`, and parameter plus backup BSON
 files were created. Parameters written with `param set` in airframe 4028 are
 intentionally forced to the validated baseline on every boot; parameters using
 `param set-default` may retain saved QGC overrides.
+
+The 2026-07-30 update adds the 100 kg Xiangyi isolation model, offline
+aerodynamic/propulsion diagnostics, sequential MATLAB comparison scripts, the
+V8 three-dimensional magnetometer adapter, finite 30 km ground collision,
+phase-specific longitudinal authority, and the final 50 m-triggered / 5 s timed
+takeoff and landing transitions. It also includes the associated source-level
+documentation. Raw Xiangyi CSV files, ULogs, build trees, parameter BSON files,
+temporary figures, and ignored runtime analysis outputs remain local-only.

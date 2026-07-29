@@ -166,9 +166,10 @@ public:
 
 	/**
 	 * @param max_pitch Externally commanded maximum pitch angle [rad]
+	 * @param restriction_blend 0 for cruise authority, 1 for the configured runway limit
 	 * @return Maximum pitch angle [rad]
 	 */
-	float getMaxPitch(const float max_pitch) const;
+	float getMaxPitch(const float max_pitch, const float restriction_blend) const;
 
 	/**
 	 * @return Runway takeoff starting position in global frame (lat, lon) [deg]
@@ -261,6 +262,7 @@ private:
 		(ParamFloat<px4::params::RWTO_TAXI_TIME>) param_rwto_taxi_time_,
 		(ParamFloat<px4::params::RWTO_ROT_AIRSPD>) param_rwto_rot_airspd_,
 		(ParamFloat<px4::params::RWTO_ROT_TIME>) param_rwto_rot_time_,
+		(ParamFloat<px4::params::RWTO_PMAX>) param_rwto_pmax_,
 		(ParamFloat<px4::params::RWTO_WHEEL_HGT>) param_rwto_wheel_hgt_
 	)
 };

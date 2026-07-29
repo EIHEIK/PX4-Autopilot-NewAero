@@ -22,6 +22,22 @@ complete Gazebo physics request, including gravity and magnetic field; sending
 only `max_step_size` disables parts of physics because `gz.msgs.Physics` is not
 a patch message.
 
+The V8 magnetic vector is the PX4 WMM-2020 value at the configured origin,
+converted from NED to Gazebo ENU:
+`[-3.55621019e-6, 3.46940371e-5, -3.25102706e-5] T`. Airframe 4028 exports the
+same vector so the runtime physics request cannot silently replace it with the
+generic Gazebo default.
+
+Gazebo Harmonic also regenerates its native magnetometer field from a coarse
+table and exposes it through a historical NED / left-handed convention. That
+path is not a valid three-dimensional rotation when an ENU/FLU pose is tilted.
+V8 therefore removes only its native magnetometer sensor and uses
+`HonghuMagnetometerV8`: the plugin rotates the exact NED field into body FRD and
+publishes the inverse legacy representation expected by PX4's unchanged
+`[-Y,-X,+Z]` Harmonic callback. The earlier V8-only two-dimensional declination
+parameter has been removed; official and older models retain their original
+bridge and sensor behavior.
+
 The V8 WGS84 origin is `28.5712315 deg N, 121.5759172 deg E, 0 m`. Airframe
 4028 also sends these coordinates through Gazebo's run-time
 `set_spherical_coordinates` service. This is deliberate: `px4-rc.gzsim` reuses
@@ -78,7 +94,15 @@ The phase-1 gear has no prismatic joints:
 - nose carrier: direct steering joint on `base_link`, plus a free wheel-spin joint;
 - wheel locations: `(-0.291274, +/-0.524303, -0.4551) m` and
   `(0.924852, 0, -0.4706) m`;
-- contact: main-wheel `mu/mu2=0.8/2.0`, nose-wheel `mu/mu2=1.2/3.0`; all three use `kp=2e6 N/m`, `kd=2e4 N s/m`, `max_vel=0.2 m/s`, and `min_depth=0.5 mm`.
+- contact: main-wheel `mu/mu2=0.8/2.0`, nose-wheel `mu/mu2=1.0/1.0`; all three use `kp=2e6 N/m`, `kd=2e4 N s/m`, `max_vel=0.2 m/s`, and `min_depth=0.5 mm`;
+- nose steering joint controller: `P/I/D=500/200/1`, integral limit `40 N m`, command limit `100 N m`.
+
+The earlier `1000/500/30` steering controller was rejected. It could force the
+loaded tyre to its static target angle, but excited the rigid contact/joint
+constraint and generated lateral IMU oscillations up to about `1.9 m/s2` that
+were absent from pose-derived acceleration. The current controller preserves a
+visible heading correction while keeping that discrepancy below about
+`0.05 m/s2` in the 20-degree disturbed taxi diagnostic.
 
 This design separates wheel/ground contact and steering from suspension
 numerics. A later suspension revision should be a separate, measurable change,
@@ -126,22 +150,83 @@ All topics use the runtime model instance name:
 | 27..50 | aileron, elevator, rudder, canard contributions; each CL,CD,CY,Cl,Cm,Cn |
 | 51..74 | eight joint axes in base_link, XYZ per axis |
 | 75 | flags: beta clamp=1, post-stall=2, control extrapolation=4, low speed=8, control-source clamp=16, derived static data=32 |
+| 76..77 | source simulation time us, diagnostic sequence |
 
-`propulsion_state` indices are target throttle, filtered throttle, altitude,
-airspeed, RPM, thrust N, torque N m, fuel kg/h and flags (input clamp=1,
-fuel-table clamp=2).
+`propulsion_state` indices 0..8 are target throttle, filtered throttle,
+altitude, airspeed, RPM, thrust N, torque N m, fuel kg/h and flags (input
+clamp=1, fuel-table clamp=2). Indices 9..10 are source simulation time us and
+diagnostic sequence.
+
+For V8 instances, `GZBridge` also converts these two diagnostic vectors to the
+uORB topics `honghu_v8_aero_state` and `honghu_v8_propulsion_state`. The logger
+records them with a 20 ms minimum interval (50 Hz). This retains actual Gazebo joint
+feedback and the engine lag state in ULog for offline rigid-body coefficient
+reconstruction without starting external topic readers during flight. Run:
+
+```bash
+python3 Tools/honghu/analyze_honghu_v8_aero_coefficients.py <flight.ulg>
+```
+
+The analyzer restores `estimator_sensor_bias.accel_bias` to PX4's filtered
+`vehicle_acceleration` before applying the force balance. PX4 has already
+removed that EKF estimate from the published controller signal; using it
+directly creates false CD/CY residuals. This is an offline-only correction and
+does not change the estimator, controller, or simulator at runtime.
+
+The implementation and the selected standard-mission result are documented in
+`Documentation/honghu/HONGHU_V8_AERO_COEFFICIENT_VALIDATION_2026-07-21.md`.
 
 ## Current verification boundary
 
+- The 2026-07-21 standard 20-item `模仿XY航线规划.plan` truth ULog provides
+  715.348 s and 14,308 valid airborne coefficient-reconstruction samples with
+  actual Gazebo joint feedback. Filtered inversion/independent-model
+  correlations are 0.999877/0.999872/0.999547/0.999400/0.989857/0.993070 for
+  CL/CD/CY/Cl/Cm/Cn. CD bias is only +0.00000164 after restoring the EKF
+  acceleration-bias estimate. This validates software and rigid-body closure,
+  not real-aircraft accuracy.
+- The corresponding complete-mission report is
+  `analysis_outputs/honghu_v8_standard_plan_offline_diagnostics_2ms.json`:
+  rotation 43.914 m/s, liftoff 44.163 m/s, maximum takeoff truth pitch
+  8.227 deg, runway-frame cross-track 0.144 m, and mission progression to LAND
+  item 18. The run stops near 5 m AGL, so touchdown and rollout remain outside
+  this acceptance.
+- A/B tests traced the two 2026-07-21 high-speed pitch divergences to six
+  concurrent external `gz topic --json-output` observers, not to the uORB truth
+  messages, aerodynamic signs, or nose-wheel parameters. Dynamic acceptance
+  now reads MAVLink during flight and loads Gazebo truth from ULog only after
+  shutdown.
+- The new 2 ms offline-diagnostic regression passes: rotation 44.028 m/s,
+  liftoff 44.208 m/s, maximum truth pitch 8.255 deg, ground cross-track
+  0.269 m, and final truth climb 46.721 m. The ULog contains 2,030 contiguous
+  50 Hz aerodynamic samples with actual joint feedback.
+
 - SDF validation, the static V8 contract, the full PX4 SITL build, target startup,
   coordinate/moment signs, and 917 aerodynamic table/sign/continuity/trim checks pass.
-- Airframe 4028 uses an 8 deg positive pitch-setpoint limit, a 6 deg/s positive
-  pitch-rate limit, `FW_PR_FF_RWTO=6.6`, `FW_PR_RWTO_Q=2.0`, and
-  `FW_PR_P/I/D/FF=0.40/0.04/0.10/0.75`. Both the pitch-rate integrator and the
+- Airframe 4028 now separates longitudinal authority by flight phase. Cruise
+  uses a 10 deg positive pitch-setpoint limit and 10 deg/s positive pitch-rate
+  limit; runway takeoff and low-height landing retain 8 deg and 6 deg/s. The
+  altitude is now only a transition trigger: climbing through 50 m above the
+  takeoff point releases takeoff limits over a 5 s smoothstep, and the first
+  descent below 50 m AGL in a LAND item introduces landing limits over the same
+  5 s duration. The resulting weights no longer follow each subsequent height
+  sample. Rate-limit changes also retain a 2 deg/s^2 safety slew.
+  `RWTO_ROT_TIME=6 s`,
+  `FW_PR_FF_RWTO=6.6`, `FW_PR_FF_LND=6.6`, `FW_PR_RWTO_Q=2.0`, and
+  `FW_PR_P/I/D/FF=0.40/0.04/0.10/0.90`. The V8-only
+  fixed canard command is +6 deg (`FW_CANARD_TO=0.4`) and the matching nominal
+  pitch trim is `TRIM_PITCH=-0.02`. Both the pitch-rate integrator and the
   TECS pitch integrator (`FW_T_I_GAIN_PIT=0.05`) remain enabled to absorb
   unknown real trim. The pitch-rate integrator is bounded by `FW_PR_IMAX=0.12`.
   The high runway feed-forward is removed over the first 2 deg/s of measured
-  nose-up rate; it is not retained into the climb.
+  nose-up rate and is not retained into the climb. Landing flare has an
+  independent feed-forward path that is enabled only by the LANDING phase and
+  the final flare/wheel-control window; it no longer borrows takeoff logic.
+- The rear propeller geometry has a 10 deg ground-strike angle. The automated
+  V8 takeoff guard is therefore 8.5 deg, rather than the former 12 deg generic
+  attitude bound. The validated 2026-07-29 candidate reached 7.96 deg maximum
+  Gazebo-truth pitch, lifted off at 42.85 m/s with 6.24 deg pitch, and retained
+  about 2 deg geometric margin while completing the 30 deg loiter regression.
 - The bounded airborne route-following baseline is
   `FW_RR_P/I/D/FF=0.26/0.05/0.06/1.45`, `FW_R_TC=0.65 s`,
   `FW_R_RMAX=20 deg/s`, `FW_R_LIM=30 deg`, `NPFG_PERIOD=20 s`, and
@@ -207,9 +292,18 @@ fuel-table clamp=2).
   takeoff sensitivity was traced primarily to PX4/Gazebo state backlog rather
   than the rigid rolling gear. The 2 ms bridge-synchronized result is the
   production requirement.
-- Full step-size convergence, automatic landing, and the -50 deg canard braking
-  aerodynamics are not yet accepted. The current world ground is 30000 x 30000 m;
-  leaving that finite surface must not be interpreted as a landing-gear failure.
-- `模仿XY航线规划.plan` contains 21 mission items and is accepted by PX4 with
-  the V8 origin, but the entire approximately 12 km-radius route and its
-  automatic landing have not yet completed a dynamic acceptance flight.
+- Full step-size convergence, automatic landing quality, and the -50 deg canard
+  braking aerodynamics are not yet accepted. The V8 world now uses a
+  30000 x 30000 x 1 m solid collision box (top surface at z=0) below the
+  unchanged 30000 x 30000 m visual plane. This avoids DART / FCL's bounded
+  broadphase proxy for an SDF plane, which previously allowed the aircraft to
+  fall through near Gazebo Y=1.1 km even though the plane was drawn to 30 km.
+- A post-fix closed-loop takeoff-and-landing test at the former failure location reached the
+  runway at 1.53 m/s sink rate and 34.13 m/s groundspeed, remained upright, and
+  held the base-link height at 0.5145 m throughout 66.6 s of rollout. Ground
+  penetration is therefore fixed; flare sink rate, braking, land detection,
+  and the -50 deg canard airbrake remain separate landing-quality work.
+- The current `模仿XY航线规划.plan` contains 20 mission items. The selected
+  coefficient-validation log progressed from item 0 to landing item 18 without
+  mission failure. Landing-item entry at about 5 m AGL is not an accepted
+  automatic touchdown and rollout test.

@@ -186,6 +186,7 @@ private:
 
 		(ParamFloat<px4::params::FW_PR_FF>) _param_fw_pr_ff,
 		(ParamFloat<px4::params::FW_PR_FF_RWTO>) _param_fw_pr_ff_rwto,
+		(ParamFloat<px4::params::FW_PR_FF_LND>) _param_fw_pr_ff_lnd,
 		(ParamFloat<px4::params::FW_PR_RWTO_Q>) _param_fw_pr_rwto_q,
 		(ParamFloat<px4::params::FW_PR_I>) _param_fw_pr_i,
 		(ParamFloat<px4::params::FW_PR_IMAX>) _param_fw_pr_imax,

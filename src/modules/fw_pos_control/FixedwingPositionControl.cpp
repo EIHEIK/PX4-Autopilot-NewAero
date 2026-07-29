@@ -48,6 +48,15 @@ using matrix::Vector2d;
 using matrix::Vector3f;
 using matrix::wrap_pi;
 
+namespace
+{
+float smoothstep_transition(const float progress)
+{
+	const float x = math::constrain(progress, 0.f, 1.f);
+	return x * x * (3.f - 2.f * x);
+}
+}
+
 FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
@@ -166,6 +175,7 @@ FixedwingPositionControl::vehicle_control_mode_poll()
 			if (!was_armed && _control_mode.flag_armed && _landed) {
 				reset_takeoff_state();// 重置 PX4 原生的固定翼起飞状态机
 				reset_landing_state();// 重置 PX4 原生的固定翼着陆状态机
+				resetPitchPhaseSchedule();
 
 				_canard_deployed = false;//鸭翼重置未展开态
 				_canard_retracted = false;//鸭翼重置为未收回态
@@ -829,6 +839,129 @@ FixedwingPositionControl::update_in_air_states(const hrt_abstime now)
 
 }
 
+void FixedwingPositionControl::resetPitchPhaseSchedule()
+{
+	_pitch_takeoff_schedule_active = false;
+	_pitch_takeoff_release_complete = false;
+	_pitch_takeoff_reference_alt = NAN;
+	_pitch_takeoff_transition_start = 0;
+	_pitch_landing_transition_start = 0;
+}
+
+void FixedwingPositionControl::updatePitchPhaseSchedule(const hrt_abstime now)
+{
+	_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_NORMAL;
+	_att_sp.fw_pitch_limit_blend = 0.f;
+
+	if (!_control_mode.flag_armed) {
+		resetPitchPhaseSchedule();
+		return;
+	}
+
+	const bool in_auto_takeoff = _control_mode_current == FW_POSCTRL_MODE_AUTO_TAKEOFF;
+
+	if (in_auto_takeoff && !_pitch_takeoff_schedule_active && !_pitch_takeoff_release_complete) {
+		_pitch_takeoff_schedule_active = true;
+		_pitch_takeoff_reference_alt = _current_altitude;
+		_pitch_takeoff_transition_start = 0;
+	}
+
+	if (!_pitch_takeoff_schedule_active) {
+		return;
+	}
+
+	_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF;
+	_att_sp.fw_pitch_limit_blend = 1.f;
+
+	const float trigger_height = _param_fw_p_tko_hgt.get();
+
+	if (trigger_height <= FLT_EPSILON) {
+		// Backward-compatible behavior: retain takeoff limits for the complete
+		// TAKEOFF item, then release immediately when Navigator advances.
+		if (!in_auto_takeoff) {
+			_pitch_takeoff_schedule_active = false;
+			_pitch_takeoff_release_complete = true;
+			_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_NORMAL;
+			_att_sp.fw_pitch_limit_blend = 0.f;
+		}
+
+		return;
+	}
+
+	if (_pitch_takeoff_transition_start == 0 && PX4_ISFINITE(_pitch_takeoff_reference_alt)
+	    && (_current_altitude - _pitch_takeoff_reference_alt) >= trigger_height) {
+		_pitch_takeoff_transition_start = now;
+	}
+
+	if (_pitch_takeoff_transition_start != 0) {
+		const float duration = _param_fw_p_trans_dur.get();
+		const float progress = duration > FLT_EPSILON ?
+			static_cast<float>(now - _pitch_takeoff_transition_start) / 1_s / duration : 1.f;
+		_att_sp.fw_pitch_limit_blend = 1.f - smoothstep_transition(progress);
+
+		if (progress >= 1.f) {
+			_pitch_takeoff_schedule_active = false;
+			_pitch_takeoff_release_complete = true;
+			_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_NORMAL;
+			_att_sp.fw_pitch_limit_blend = 0.f;
+		}
+	}
+}
+
+void FixedwingPositionControl::updateLandingPitchSchedule(const hrt_abstime now,
+		float height_above_landing_surface)
+{
+	// Navigator can briefly expose a LAND item while the armed aircraft is still
+	// waiting on the runway. Do not let that preflight item permanently cancel
+	// the pending takeoff schedule.
+	if (_landed && !_pitch_takeoff_release_complete) {
+		_att_sp.fw_pitch_mode = _pitch_takeoff_schedule_active ?
+			vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF :
+			vehicle_attitude_setpoint_s::FW_PITCH_MODE_NORMAL;
+		_att_sp.fw_pitch_limit_blend = _pitch_takeoff_schedule_active ? 1.f : 0.f;
+		return;
+	}
+
+	// Landing takes precedence over an incomplete takeoff release, for example
+	// in a deliberately low circuit that never crossed the takeoff trigger.
+	_pitch_takeoff_schedule_active = false;
+	_pitch_takeoff_release_complete = true;
+	_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING;
+	_att_sp.fw_pitch_limit_blend = 0.f;
+
+	const float trigger_height = _param_fw_p_lnd_hgt.get();
+
+	if (_pitch_landing_transition_start == 0
+	    && (trigger_height <= FLT_EPSILON || height_above_landing_surface <= trigger_height)) {
+		_pitch_landing_transition_start = now;
+	}
+
+	if (_pitch_landing_transition_start != 0) {
+		const float duration = _param_fw_p_trans_dur.get();
+		const float progress = duration > FLT_EPSILON ?
+			static_cast<float>(now - _pitch_landing_transition_start) / 1_s / duration : 1.f;
+		_att_sp.fw_pitch_limit_blend = smoothstep_transition(progress);
+	}
+}
+
+float FixedwingPositionControl::getActivePitchMax() const
+{
+	const float cruise_pitch_max = radians(_param_fw_p_lim_max.get());
+	float phase_pitch_max = cruise_pitch_max;
+
+	if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF
+	    && _param_rwto_pmax.get() >= 0.f) {
+		phase_pitch_max = math::min(cruise_pitch_max, radians(_param_rwto_pmax.get()));
+
+	} else if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING
+		   && _param_fw_lnd_pmax.get() >= 0.f) {
+		phase_pitch_max = math::min(cruise_pitch_max, radians(_param_fw_lnd_pmax.get()));
+	}
+
+	return cruise_pitch_max + math::constrain(_att_sp.fw_pitch_limit_blend, 0.f, 1.f)
+	       * (phase_pitch_max - cruise_pitch_max);
+}
+
 void
 FixedwingPositionControl::move_position_setpoint_for_vtol_transition(position_setpoint_s &current_sp)
 {
@@ -1369,7 +1502,7 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 				   _current_altitude,
 				   _performance_model.getCalibratedTrimAirspeed(),
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   _param_fw_thr_min.get(),
 				   _param_fw_thr_max.get(),
 				   _param_sinkrate_target.get(),
@@ -1408,7 +1541,7 @@ FixedwingPositionControl::control_auto_descend(const float control_interval)
 				   _current_altitude,
 				   _performance_model.getCalibratedTrimAirspeed(),
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   _param_fw_thr_min.get(),
 				   _param_fw_thr_max.get(),
 				   _param_sinkrate_target.get(),
@@ -1564,7 +1697,7 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 				   position_sp_alt,
 				   target_airspeed,
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   tecs_fw_thr_min,
 				   tecs_fw_thr_max,
 				   _param_sinkrate_target.get(),
@@ -1621,7 +1754,7 @@ FixedwingPositionControl::control_auto_velocity(const float control_interval, co
 				   position_sp_alt,
 				   target_airspeed,
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   tecs_fw_thr_min,
 				   tecs_fw_thr_max,
 				   _param_sinkrate_target.get(),
@@ -1750,7 +1883,7 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 				   alt_sp,
 				   target_airspeed,
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   tecs_fw_thr_min,
 				   tecs_fw_thr_max,
 				   _param_sinkrate_target.get(),
@@ -1811,7 +1944,7 @@ FixedwingPositionControl::controlAutoFigureEight(const float control_interval, c
 				   pos_sp_curr.alt,
 				   target_airspeed,
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   tecs_fw_thr_min,
 				   tecs_fw_thr_max,
 				   _param_sinkrate_target.get(),
@@ -1888,7 +2021,7 @@ FixedwingPositionControl::control_auto_path(const float control_interval, const 
 				   pos_sp_curr.alt,
 				   target_airspeed,
 				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   tecs_fw_thr_min,
 				   tecs_fw_thr_max,
 				   _param_sinkrate_target.get(),
@@ -2051,7 +2184,8 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		float yaw_body = _runway_takeoff.getYaw(bearing);
 
 		// update tecs
-		const float pitch_max = _runway_takeoff.getMaxPitch(math::radians(_param_fw_p_lim_max.get()));
+		const float pitch_max = _runway_takeoff.getMaxPitch(
+					math::radians(_param_fw_p_lim_max.get()), _att_sp.fw_pitch_limit_blend);
 		const float pitch_min = _runway_takeoff.getMinPitch(math::radians(_takeoff_pitch_min.get()),
 					math::radians(_param_fw_p_lim_min.get()));
 
@@ -2162,7 +2296,7 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 						   altitude_setpoint_amsl,
 						   target_airspeed,
 						   radians(_takeoff_pitch_min.get()),
-						   radians(_param_fw_p_lim_max.get()),
+						   getActivePitchMax(),
 						   _param_fw_thr_min.get(),
 						   max_takeoff_throttle,
 						   _param_sinkrate_target.get(),
@@ -2218,6 +2352,9 @@ void
 FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, const float control_interval,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr)
 {
+	_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING;
+	_att_sp.fw_pitch_limit_blend = 0.f;
+
 	//自动着陆控制函数
 	// first handle non-position things like airspeed and tecs settings
 	const float airspeed_land = (_param_fw_lnd_airspd.get() > FLT_EPSILON) ? _param_fw_lnd_airspd.get() :
@@ -2263,6 +2400,9 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 					      position_controller_landing_status_s::TERRAIN_TIMEOUT);
 	const float terrain_alt = getLandingTerrainAltitudeEstimate(now, pos_sp_curr.alt, abort_on_terrain_measurement_timeout,
 				  abort_on_terrain_timeout);
+	const float landing_height = math::max(_current_altitude - terrain_alt, 0.f);
+	updateLandingPitchSchedule(now, landing_height);
+	const float landing_pitch_max = getActivePitchMax();
 	const float glide_slope_reference_alt = (_param_fw_lnd_useter.get() ==
 						TerrainEstimateUseOnLanding::kFollowTerrainRelativeLandingGlideSlope) ? terrain_alt : pos_sp_curr.alt;
 
@@ -2330,7 +2470,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		float pitch_min_rad = flare_ramp_interpolator_sqrt * radians(_param_fw_lnd_fl_pmin.get()) +
 				      (1.0f - flare_ramp_interpolator_sqrt) * radians(_param_fw_p_lim_min.get());
 		float pitch_max_rad = flare_ramp_interpolator_sqrt * radians(_param_fw_lnd_fl_pmax.get()) +
-				      (1.0f - flare_ramp_interpolator_sqrt) * radians(_param_fw_p_lim_max.get());
+				      (1.0f - flare_ramp_interpolator_sqrt) * landing_pitch_max;
 
 		if (_param_fw_lnd_td_time.get() > FLT_EPSILON) {
 			const float touchdown_time = math::max(_param_fw_lnd_td_time.get(), _param_fw_lnd_fl_time.get());
@@ -2418,7 +2558,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 					   altitude_setpoint,
 					   target_airspeed,
 					   radians(_param_fw_p_lim_min.get()),
-					   radians(_param_fw_p_lim_max.get()),
+					   landing_pitch_max,
 					   _param_fw_thr_min.get(),
 					   _param_fw_thr_max.get(),
 					   desired_max_sinkrate,
@@ -2517,6 +2657,9 @@ void
 FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, const float control_interval,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr)
 {
+	_att_sp.fw_pitch_mode = vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING;
+	_att_sp.fw_pitch_limit_blend = 0.f;
+
 	// first handle non-position things like airspeed and tecs settings
 	const float airspeed_land = (_param_fw_lnd_airspd.get() > FLT_EPSILON) ? _param_fw_lnd_airspd.get() :
 				    _performance_model.getMinimumCalibratedAirspeed(getLoadFactor());
@@ -2544,6 +2687,9 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	const bool abort_on_terrain_timeout = checkLandingAbortBitMask(_param_fw_lnd_abort.get(),
 					      position_controller_landing_status_s::TERRAIN_TIMEOUT);
 	const float terrain_alt = getLandingTerrainAltitudeEstimate(now, pos_sp_curr.alt, false, abort_on_terrain_timeout);
+	const float landing_height = math::max(_current_altitude - terrain_alt, 0.f);
+	updateLandingPitchSchedule(now, landing_height);
+	const float landing_pitch_max = getActivePitchMax();
 
 	// flare at the maximum of the altitude determined by the time before touchdown and a minimum flare altitude
 	const float flare_rel_alt = math::max(_param_fw_lnd_fl_time.get() * _local_pos.vz, _param_fw_lnd_flalt.get());
@@ -2608,7 +2754,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		float pitch_min_rad = flare_ramp_interpolator_sqrt * radians(_param_fw_lnd_fl_pmin.get()) +
 				      (1.0f - flare_ramp_interpolator_sqrt) * radians(_param_fw_p_lim_min.get());
 		float pitch_max_rad = flare_ramp_interpolator_sqrt * radians(_param_fw_lnd_fl_pmax.get()) +
-				      (1.0f - flare_ramp_interpolator_sqrt) * radians(_param_fw_p_lim_max.get());
+				      (1.0f - flare_ramp_interpolator_sqrt) * landing_pitch_max;
 
 		if (_param_fw_lnd_td_time.get() > FLT_EPSILON) {
 			const float touchdown_time = math::max(_param_fw_lnd_td_time.get(), _param_fw_lnd_fl_time.get());
@@ -2691,7 +2837,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 					   _current_altitude, // is not controlled, control descend rate
 					   target_airspeed,
 					   radians(_param_fw_p_lim_min.get()),
-					   radians(_param_fw_p_lim_max.get()),
+					   landing_pitch_max,
 					   _param_fw_thr_min.get(),
 					   _param_fw_thr_max.get(),
 					   desired_max_sinkrate,
@@ -2818,7 +2964,7 @@ FixedwingPositionControl::control_manual_altitude(const float control_interval, 
 				   _current_altitude,
 				   calibrated_airspeed_sp,
 				   min_pitch,
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   _param_fw_thr_min.get(),
 				   throttle_max,
 				   _param_sinkrate_target.get(),
@@ -2924,7 +3070,7 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 				   _current_altitude, // TODO: check if this is really what we want.. or if we want to lock the altitude.
 				   calibrated_airspeed_sp,
 				   min_pitch,
-				   radians(_param_fw_p_lim_max.get()),
+				   getActivePitchMax(),
 				   _param_fw_thr_min.get(),
 				   throttle_max,
 				   _param_sinkrate_target.get(),
@@ -3349,6 +3495,7 @@ FixedwingPositionControl::Run()
 
 		// by default we don't want yaw to be contoller directly with rudder
 		_att_sp.fw_control_yaw_wheel = false;
+		updatePitchPhaseSchedule(_local_pos.timestamp);
 
 		// default to zero - is used (IN A HACKY WAY) to pass direct nose wheel steering via yaw stick to the actuators during auto takeoff
 		_att_sp.yaw_sp_move_rate = 0.0f;
@@ -3459,7 +3606,7 @@ FixedwingPositionControl::Run()
 				roll_body = constrain(roll_body, -radians(_param_fw_r_lim.get()),
 						      radians(_param_fw_r_lim.get()));
 				pitch_body = constrain(pitch_body, radians(_param_fw_p_lim_min.get()),
-						       radians(_param_fw_p_lim_max.get()));
+						       getActivePitchMax());
 			}
 
 			if (_control_mode.flag_control_position_enabled ||
@@ -3554,6 +3701,7 @@ void
 FixedwingPositionControl::reset_landing_state()
 {
 	_time_started_landing = 0;
+	_pitch_landing_transition_start = 0;
 
 	_flare_states = FlareStates{};
 

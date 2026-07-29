@@ -395,6 +395,71 @@ PARAM_DEFINE_FLOAT(FW_LND_FL_PMIN, 2.5f);
 PARAM_DEFINE_FLOAT(FW_LND_FL_PMAX, 15.0f);
 
 /**
+ * Maximum pitch during low-height landing approach
+ *
+ * A negative value uses FW_P_LIM_MAX. When enabled, crossing FW_P_LND_HGT
+ * starts a time-based transition from the cruise value to this value.
+ *
+ * @unit deg
+ * @min -1.0
+ * @max 45.0
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Auto Landing
+ */
+PARAM_DEFINE_FLOAT(FW_LND_PMAX, -1.0f);
+
+/**
+ * Height that triggers release of the takeoff pitch restriction
+ *
+ * Once the aircraft climbs above this height relative to the takeoff point,
+ * the takeoff pitch-angle and pitch-rate restrictions transition to cruise
+ * values over FW_P_TRANS_DUR. Zero keeps the restriction active throughout
+ * the takeoff item and releases it when that item ends.
+ *
+ * @unit m
+ * @min 0.0
+ * @max 100.0
+ * @decimal 1
+ * @increment 1.0
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_TKO_HGT, 0.0f);
+
+/**
+ * Height that triggers the landing pitch restriction
+ *
+ * The first descent below this height relative to the landing surface starts a
+ * transition from cruise to landing pitch limits over FW_P_TRANS_DUR. Height
+ * changes after the trigger do not continuously remap controller parameters.
+ * Zero starts the transition immediately on entering the landing item.
+ *
+ * @unit m
+ * @min 0.0
+ * @max 200.0
+ * @decimal 1
+ * @increment 1.0
+ * @group FW Auto Landing
+ */
+PARAM_DEFINE_FLOAT(FW_P_LND_HGT, 0.0f);
+
+/**
+ * Pitch phase transition duration
+ *
+ * Time used to transition pitch-angle and positive pitch-rate limits after the
+ * takeoff or landing height trigger. The transition uses a smoothstep profile.
+ * Zero applies the target limits immediately after the trigger.
+ *
+ * @unit s
+ * @min 0.0
+ * @max 30.0
+ * @decimal 1
+ * @increment 0.5
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_TRANS_DUR, 0.0f);
+
+/**
  * Landing airspeed
  *
  * The calibrated airspeed setpoint during landing.

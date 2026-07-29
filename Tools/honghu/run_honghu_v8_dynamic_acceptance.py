@@ -2,7 +2,9 @@
 """End-to-end static, ground-roll, takeoff and flight acceptance for Honghu Wing V8.
 
 This launches the production PX4/Gazebo target, uploads a straight eastbound
-mission, and measures the vehicle through MAVLink and Gazebo truth diagnostics.
+mission, and measures the vehicle through MAVLink. Gazebo truth diagnostics
+are read from ULog only after PX4 and Gazebo have stopped; the acceptance tool
+never starts external topic observers during closed-loop flight.
 PX4's BSON parameter files and dataman mission store are snapshotted before
 launch and restored byte-for-byte after every run so a test cannot leak
 temporary parameters or replace a developer's QGC mission.
@@ -19,15 +21,19 @@ import signal
 import statistics
 import subprocess
 import tempfile
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from pymavlink import mavutil
+import numpy as np
+from pyulog import ULog
+
+from upload_qgc_plan import load_items
 
 
 ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_STANDARD_PLAN = Path("/home/fly/px4_reference_docs/current/模仿XY航线规划.plan")
 DEFAULT_TEST_MAVLINK_PORT = 15550
 ROUTE_LAST_WAYPOINT_SEQUENCE = 5
 # Local NED route for lateral guidance identification.  After the eastbound
@@ -45,16 +51,6 @@ ROUTE_POINTS_NED = {
 }
 PX4_BIN = ROOT / "build/px4_sitl_default/bin"
 ROOTFS = ROOT / "build/px4_sitl_default/rootfs"
-MODEL = "honghu_wing_150kg_v8_0"
-AERO_TOPIC = f"/model/{MODEL}/honghu_v8/aero_state"
-PROPULSION_TOPIC = f"/model/{MODEL}/honghu_v8/propulsion_state"
-POSE_TOPIC = "/world/honghu_v8/dynamic_pose/info"
-SERVO_TOPICS = {
-    f"servo_{index}": f"/model/{MODEL}/servo_{index}"
-    # Elevator traces support rotation phase checks; servo_8 records the nose
-    # steering request used by the ground-path acceptance case.
-    for index in (2, 3, 8)
-}
 SITL_STATE_FILES = (
     ROOTFS / "parameters.bson",
     ROOTFS / "parameters_backup.bson",
@@ -108,155 +104,150 @@ class SitlStateSnapshot:
                 path.unlink()
 
 
-class AeroSampler:
-    """Continuously consume Gazebo diagnostics and retain a 20 Hz wall-clock trace."""
+class OfflineGazeboDiagnostics:
+    """Read Gazebo truth from the completed ULog, never during simulation."""
 
     def __init__(self) -> None:
-        self.stop_event = threading.Event()
         self.samples: list[dict] = []
         self.propulsion_samples: list[dict] = []
         self.pose_samples: list[dict] = []
-        self.servo_command_samples: dict[str, list[dict]] = {
-            name: [] for name in SERVO_TOPICS
-        }
-        self.processes: list[subprocess.Popen] = []
-        self.threads: list[threading.Thread] = []
-
-    def start(self) -> None:
-        sources = [
-            (AERO_TOPIC, self.samples, self._decode_aero),
-            (PROPULSION_TOPIC, self.propulsion_samples, self._decode_propulsion),
-            (POSE_TOPIC, self.pose_samples, self._decode_pose),
-        ]
-        sources.extend(
-            (topic, self.servo_command_samples[name], self._decode_servo_command)
-            for name, topic in SERVO_TOPICS.items()
-        )
-        for topic, destination, decoder in sources:
-            process = subprocess.Popen(
-                ["gz", "topic", "-e", "--json-output", "-t", topic],
-                cwd=ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                bufsize=1,
-            )
-            self.processes.append(process)
-            thread = threading.Thread(
-                target=self._consume, args=(process, destination, decoder), daemon=True
-            )
-            self.threads.append(thread)
-            thread.start()
-
-    def close(self) -> None:
-        self.stop_event.set()
-        for process in self.processes:
-            if process.poll() is None:
-                process.terminate()
-        for process in self.processes:
-            try:
-                process.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2.0)
-        for thread in self.threads:
-            thread.join(timeout=2.0)
-
-    def _consume(self, process: subprocess.Popen, destination: list[dict], decoder) -> None:
-        last_retained = 0.0
-        if process.stdout is None:
-            return
-        for line in process.stdout:
-            if self.stop_event.is_set():
-                break
-            try:
-                payload = json.loads(line.strip())
-                frame = payload.get("data", payload)
-                now = time.monotonic()
-                if now - last_retained < 0.05:
-                    continue
-                sample = decoder(frame, now)
-                if sample is not None:
-                    destination.append(sample)
-                    last_retained = now
-            except (TypeError, ValueError):
-                continue
+        self.servo_command_samples: dict[str, list[dict]] = {}
+        self.ulog_path: Path | None = None
 
     @staticmethod
-    def _decode_aero(frame: list, now: float) -> dict | None:
-        if len(frame) != 76:
-            return None
-        return {
-            "wall_time_s": now,
-            "airspeed_m_s": float(frame[0]),
-            "alpha_deg": float(frame[1]),
-            "beta_deg": float(frame[2]),
-            "rho_kg_m3": float(frame[3]),
-            "alpha_dot_rad_s": float(frame[4]),
-            "beta_dot_rad_s": float(frame[5]),
-            "body_rates_frd_rad_s": [float(value) for value in frame[6:9]],
-            "coefficients": [float(value) for value in frame[9:15]],
-            "theta_joint_deg": [float(value) for value in frame[15:23]],
-            "delta_doc_deg": [float(value) for value in frame[23:27]],
-            "flags": int(round(frame[75])),
-        }
+    def _dataset(ulog: ULog, name: str):
+        return next((item for item in ulog.data_list if item.name == name), None)
 
     @staticmethod
-    def _decode_propulsion(frame: list, now: float) -> dict | None:
-        if len(frame) < 9:
-            return None
-        return {
-            "wall_time_s": now,
-            "target_throttle": float(frame[0]),
-            "filtered_throttle": float(frame[1]),
-            "altitude_m": float(frame[2]),
-            "airspeed_m_s": float(frame[3]),
-            "rpm": float(frame[4]),
-            "thrust_n": float(frame[5]),
-            "torque_nm": float(frame[6]),
-            "fuel_rate": float(frame[7]),
-            "flags": int(round(frame[8])),
-        }
+    def _sample_time_s(dataset) -> np.ndarray:
+        if "timestamp_sample" in dataset.data:
+            source = np.asarray(dataset.data["timestamp_sample"], dtype=float)
+            if len(source) and np.count_nonzero(source > 0) > len(source) // 2:
+                return source * 1e-6
+        return np.asarray(dataset.data["timestamp"], dtype=float) * 1e-6
 
     @staticmethod
-    def _decode_pose(frame: dict, now: float) -> dict | None:
-        if not isinstance(frame, dict):
-            return None
-        model_pose = next(
-            (pose for pose in frame.get("pose", []) if pose.get("name") == MODEL),
-            None,
-        )
-        if model_pose is None:
-            return None
-        position = model_pose.get("position", {})
-        orientation = model_pose.get("orientation", {})
-        x = float(orientation.get("x", 0.0))
-        y = float(orientation.get("y", 0.0))
-        z = float(orientation.get("z", 0.0))
-        w = float(orientation.get("w", 1.0))
+    def _attitude_deg(quaternion: tuple[float, float, float, float]) -> tuple[float, float, float]:
+        w, x, y, z = quaternion
         roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
         pitch_argument = 2.0 * (w * y - z * x)
-        pitch = (
-            math.copysign(math.pi / 2.0, pitch_argument)
-            if abs(pitch_argument) >= 1.0
-            else math.asin(pitch_argument)
-        )
+        pitch = math.copysign(math.pi / 2.0, pitch_argument) \
+            if abs(pitch_argument) >= 1.0 else math.asin(pitch_argument)
         yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-        return {
-            "wall_time_s": now,
-            "x_m": float(position.get("x", 0.0)),
-            "y_m": float(position.get("y", 0.0)),
-            "z_m": float(position.get("z", 0.0)),
-            "roll_deg": math.degrees(roll),
-            "pitch_deg": math.degrees(pitch),
-            "yaw_deg": math.degrees(yaw),
-        }
+        return tuple(math.degrees(value) for value in (roll, pitch, yaw))
 
     @staticmethod
-    def _decode_servo_command(value, now: float) -> dict | None:
-        if not isinstance(value, (int, float)):
-            return None
-        return {"wall_time_s": now, "angle_rad": float(value), "angle_deg": math.degrees(float(value))}
+    def _wall_time_mapper(live_samples: list[dict]):
+        sim_time = np.asarray([sample["sim_time_s"] for sample in live_samples], dtype=float)
+        wall_time = np.asarray([sample["wall_time_s"] for sample in live_samples], dtype=float)
+
+        def convert(source_time: np.ndarray) -> np.ndarray:
+            return np.interp(source_time, sim_time, wall_time, left=wall_time[0], right=wall_time[-1])
+
+        return convert
+
+    def load(self, ulog_path: Path, live_samples: list[dict]) -> None:
+        """Populate the former live-sampler interface after PX4 has stopped."""
+        self.ulog_path = ulog_path
+        ulog = ULog(
+            str(ulog_path),
+            message_name_filter_list=[
+                "honghu_v8_aero_state", "honghu_v8_propulsion_state",
+                "vehicle_local_position_groundtruth", "vehicle_attitude_groundtruth",
+            ],
+        )
+        to_wall = self._wall_time_mapper(live_samples)
+        aero = self._dataset(ulog, "honghu_v8_aero_state")
+        if aero is not None:
+            source_time = self._sample_time_s(aero)
+            wall_time = to_wall(source_time)
+            for index, now in enumerate(wall_time):
+                self.samples.append(
+                    {
+                        "wall_time_s": float(now),
+                        "sim_time_s": float(source_time[index]),
+                        "airspeed_m_s": float(aero.data["airspeed_m_s"][index]),
+                        "alpha_deg": float(aero.data["alpha_deg"][index]),
+                        "beta_deg": float(aero.data["beta_deg"][index]),
+                        "rho_kg_m3": float(aero.data["rho_kg_m3"][index]),
+                        "alpha_dot_rad_s": float(aero.data["alpha_dot_rad_s"][index]),
+                        "beta_dot_rad_s": float(aero.data["beta_dot_rad_s"][index]),
+                        "body_rates_frd_rad_s": [
+                            float(aero.data[f"body_rates_frd_rad_s[{axis}]"][index])
+                            for axis in range(3)
+                        ],
+                        "coefficients": [
+                            float(aero.data[f"coefficients[{axis}]"][index]) for axis in range(6)
+                        ],
+                        "theta_joint_deg": [
+                            float(aero.data[f"joint_angles_deg[{axis}]"][index]) for axis in range(8)
+                        ],
+                        "delta_doc_deg": [
+                            float(aero.data[f"delta_doc_deg[{axis}]"][index]) for axis in range(4)
+                        ],
+                        "flags": int(aero.data["flags"][index]),
+                    }
+                )
+
+        propulsion = self._dataset(ulog, "honghu_v8_propulsion_state")
+        if propulsion is not None:
+            source_time = self._sample_time_s(propulsion)
+            wall_time = to_wall(source_time)
+            fields = (
+                "target_throttle", "filtered_throttle", "altitude_m", "airspeed_m_s",
+                "rpm", "thrust_n", "torque_nm", "fuel_rate",
+            )
+            for index, now in enumerate(wall_time):
+                sample = {
+                    "wall_time_s": float(now),
+                    "sim_time_s": float(source_time[index]),
+                    "flags": int(propulsion.data["flags"][index]),
+                }
+                sample.update({field: float(propulsion.data[field][index]) for field in fields})
+                self.propulsion_samples.append(sample)
+
+        local_position = self._dataset(ulog, "vehicle_local_position_groundtruth")
+        attitude = self._dataset(ulog, "vehicle_attitude_groundtruth")
+        if local_position is not None and attitude is not None:
+            pose_time = self._sample_time_s(attitude)
+            position_time = self._sample_time_s(local_position)
+            east = np.interp(pose_time, position_time, local_position.data["y"])
+            north = np.interp(pose_time, position_time, local_position.data["x"])
+            up = -np.interp(pose_time, position_time, local_position.data["z"])
+            wall_time = to_wall(pose_time)
+            for index, now in enumerate(wall_time):
+                quaternion = tuple(
+                    float(attitude.data[f"q[{axis}]"][index]) for axis in range(4)
+                )
+                roll, pitch, yaw = self._attitude_deg(quaternion)
+                self.pose_samples.append(
+                    {
+                        "wall_time_s": float(now), "sim_time_s": float(pose_time[index]),
+                        "x_m": float(east[index]), "y_m": float(north[index]),
+                        "z_m": float(up[index]), "roll_deg": roll,
+                        "pitch_deg": pitch, "yaw_deg": yaw,
+                    }
+                )
+
+        if self.pose_samples:
+            pose_wall = np.asarray([sample["wall_time_s"] for sample in self.pose_samples])
+            origin = self.pose_samples[0]
+            along_truth = np.asarray([
+                pose["x_m"] - origin["x_m"] for pose in self.pose_samples
+            ])
+            cross_truth = np.asarray([
+                pose["y_m"] - origin["y_m"] for pose in self.pose_samples
+            ])
+            altitude_truth = np.asarray([
+                pose["z_m"] - origin["z_m"] for pose in self.pose_samples
+            ])
+            pitch_truth = np.asarray([pose["pitch_deg"] for pose in self.pose_samples])
+            for sample in live_samples:
+                wall = sample["wall_time_s"]
+                sample["gazebo_along_track_m"] = float(np.interp(wall, pose_wall, along_truth))
+                sample["gazebo_cross_track_m"] = float(np.interp(wall, pose_wall, cross_truth))
+                sample["gazebo_altitude_gain_m"] = float(np.interp(wall, pose_wall, altitude_truth))
+                sample["gazebo_pitch_deg"] = float(np.interp(wall, pose_wall, pitch_truth))
 
 
 @dataclass
@@ -282,6 +273,13 @@ class DynamicRun:
         mavlink_port: int = DEFAULT_TEST_MAVLINK_PORT,
         coincident_takeoff: bool = False,
         initial_yaw_deg: float = 0.0,
+        standard_plan: Path = DEFAULT_STANDARD_PLAN,
+        make_target: str = "gz_honghu_wing_150kg_v8",
+        expected_canard_deg: float = 6.0,
+        through_touchdown: bool = False,
+        physics_engine: str | None = None,
+        spawn_x_m: float = 0.0,
+        spawn_y_m: float = 0.0,
     ) -> None:
         self.scenario = scenario
         self.step_size = step_size
@@ -292,12 +290,20 @@ class DynamicRun:
         self.mavlink_port = mavlink_port
         self.coincident_takeoff = coincident_takeoff
         self.initial_yaw_deg = initial_yaw_deg
+        self.standard_plan = standard_plan
+        self.make_target = make_target
+        self.expected_canard_deg = expected_canard_deg
+        self.through_touchdown = through_touchdown
+        self.physics_engine = physics_engine
+        self.spawn_x_m = spawn_x_m
+        self.spawn_y_m = spawn_y_m
         self.snapshot = SitlStateSnapshot()
         self.make_process: subprocess.Popen | None = None
         self.make_log_path: Path | None = None
         self.make_log_file = None
         self.connection = None
-        self.aero = AeroSampler()
+        self.aero = OfflineGazeboDiagnostics()
+        self.ulog_files_before: set[Path] = set()
         self.target_system = 1
         self.target_component = 1
 
@@ -308,13 +314,24 @@ class DynamicRun:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        active = [line for line in result.stdout.splitlines() if "pgrep -af" not in line]
+        active = []
+        for line in result.stdout.splitlines():
+            if "pgrep -af" in line:
+                continue
+            process_id = line.split(maxsplit=1)[0]
+            if process_id == str(os.getpid()):
+                # A standard-plan path contains "px4_reference_docs" and can
+                # match the broad safety expression. Do not mistake this
+                # runner for a pre-existing simulator.
+                continue
+            active.append(line)
         if active:
             raise RuntimeError("existing PX4/Gazebo process detected; refusing to disturb it:\n" + "\n".join(active))
 
     def start(self) -> None:
         self._assert_clean_runtime()
         self.snapshot.capture()
+        self.ulog_files_before = set(ROOTFS.glob("log/**/*.ulg"))
         output_dir = ROOT / "analysis_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
         step_label = f"{self.step_size * 1000:g}".replace(".", "p")
@@ -323,12 +340,16 @@ class DynamicRun:
         env = os.environ.copy()
         env["HEADLESS"] = "1"
         env["PX4_GZ_MAX_STEP_SIZE"] = f"{self.step_size:.7f}"
+        if self.physics_engine:
+            env["PX4_GZ_PHYSICS_ENGINE"] = self.physics_engine
         # Production 4028 aligns the aircraft with the geographic XY mission.
         # Acceptance missions are deliberately eastbound, so override only the
         # test spawn yaw while retaining the validated 0.5145 m spawn height.
-        env["PX4_GZ_MODEL_POSE"] = (
-            f"0,0,0.5145,0,0,{math.radians(self.initial_yaw_deg):.9f}"
-        )
+        if self.scenario != "standard":
+            env["PX4_GZ_MODEL_POSE"] = (
+                f"{self.spawn_x_m:.6f},{self.spawn_y_m:.6f},0.5145,0,0,"
+                f"{math.radians(self.initial_yaw_deg):.9f}"
+            )
         # Keep automated acceptance independent of a concurrently open QGC,
         # which can otherwise claim both the standard remote endpoint and the
         # PX4 UDP partner learned through local port 18570.
@@ -336,7 +357,7 @@ class DynamicRun:
         env["PX4_GCS_REMOTE_PORT"] = str(self.mavlink_port)
         env["PX4_GCS_MINIMAL_STREAMS"] = "1"
         self.make_process = subprocess.Popen(
-            ["make", "px4_sitl", "gz_honghu_wing_150kg_v8"],
+            ["make", "px4_sitl", self.make_target],
             cwd=ROOT,
             env=env,
             stdout=self.make_log_file,
@@ -349,14 +370,20 @@ class DynamicRun:
         self.connection = mavutil.mavlink_connection(
             f"udpin:127.0.0.1:{self.mavlink_port}", source_system=250,
         )
-        heartbeat = self.connection.wait_heartbeat(timeout=45)
+        heartbeat = None
+        heartbeat_deadline = time.monotonic() + 45.0
+        while heartbeat is None and time.monotonic() < heartbeat_deadline:
+            heartbeat = self.connection.wait_heartbeat(timeout=1.0)
+            if self.make_process.poll() is not None:
+                raise RuntimeError(
+                    f"PX4/Gazebo target exited before heartbeat; see {self.make_log_path}"
+                )
         if heartbeat is None:
             raise TimeoutError(f"PX4 heartbeat not received; see {self.make_log_path}")
         self.target_system = heartbeat.get_srcSystem()
         self.target_component = heartbeat.get_srcComponent()
         self._configure_streams()
         self._set_test_parameters()
-        self.aero.start()
 
     def _configure_streams(self) -> None:
         for message_id, rate_hz in (
@@ -458,6 +485,12 @@ class DynamicRun:
                 # Keep a landing endpoint for PX4 mission feasibility. The
                 # route test stops immediately when this item becomes current.
                 (mavutil.mavlink.MAV_CMD_NAV_LAND, 4678.46, 1839.23, 0.0, 100.0),
+            ]
+        elif self.scenario == "landing":
+            specifications = [
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0.0, 1000.0, 40.0, 50.0),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0.0, 1600.0, 50.0, 100.0),
+                (mavutil.mavlink.MAV_CMD_NAV_LAND, 0.0, 3000.0, 0.0, 100.0),
             ]
         else:
             specifications = [
@@ -564,6 +597,63 @@ class DynamicRun:
             sent.add(sequence)
         raise TimeoutError(f"mission upload timed out after sending {sorted(sent)}")
 
+    def upload_standard_plan(self) -> list[dict]:
+        """Upload every SimpleItem from the QGC plan without changing geometry."""
+        items = load_items(self.standard_plan)
+        self.connection.mav.mission_clear_all_send(
+            self.target_system, self.target_component,
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION,
+        )
+        clear_deadline = time.monotonic() + 3.0
+        while time.monotonic() < clear_deadline:
+            clear_ack = self.connection.recv_match(type="MISSION_ACK", blocking=True, timeout=0.3)
+            if clear_ack is not None:
+                if clear_ack.type != mavutil.mavlink.MAV_MISSION_ACCEPTED:
+                    raise RuntimeError(f"mission clear rejected with ACK type {clear_ack.type}")
+                break
+
+        self.connection.mav.mission_count_send(
+            self.target_system, self.target_component, len(items),
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION,
+        )
+        sent: set[int] = set()
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            self._send_gcs_heartbeat()
+            message = self.connection.recv_match(
+                type=["MISSION_REQUEST_INT", "MISSION_REQUEST", "MISSION_ACK"],
+                blocking=True, timeout=1.0,
+            )
+            if message is None:
+                continue
+            if message.get_type() == "MISSION_ACK":
+                if message.type != mavutil.mavlink.MAV_MISSION_ACCEPTED:
+                    raise RuntimeError(f"standard plan rejected with ACK type {message.type}")
+                if len(sent) == len(items):
+                    self.connection.mav.mission_set_current_send(
+                        self.target_system, self.target_component, 0,
+                    )
+                    return items
+                self.connection.mav.mission_count_send(
+                    self.target_system, self.target_component, len(items),
+                    mavutil.mavlink.MAV_MISSION_TYPE_MISSION,
+                )
+                continue
+
+            sequence = int(message.seq)
+            if not 0 <= sequence < len(items):
+                raise RuntimeError(f"PX4 requested invalid standard-plan sequence {sequence}")
+            item = items[sequence]
+            self.connection.mav.mission_item_int_send(
+                self.target_system, self.target_component, sequence,
+                item["frame"], item["command"], 1 if sequence == 0 else 0,
+                item["autocontinue"], item["param1"], item["param2"],
+                item["param3"], item["param4"], item["x"], item["y"], item["z"],
+                mavutil.mavlink.MAV_MISSION_TYPE_MISSION,
+            )
+            sent.add(sequence)
+        raise TimeoutError(f"standard-plan upload timed out after sending {sorted(sent)}")
+
     def arm_and_start_mission(self) -> None:
         run([str(PX4_BIN / "px4-commander"), "mode", "auto:mission"])
         time.sleep(0.5)
@@ -577,7 +667,7 @@ class DynamicRun:
         # than this client stdout; its process return code is authoritative.
         run([str(PX4_BIN / "px4-commander"), "arm", "-f"])
 
-    def collect(self, initial_local: object) -> dict:
+    def collect(self, initial_local: object) -> tuple[list[dict], dict | None, dict | None, float | None]:
         state = TelemetryState(local=initial_local)
         samples: list[dict] = []
         start = time.monotonic()
@@ -587,7 +677,8 @@ class DynamicRun:
         liftoff_candidate = None
         loiter_start = None
         loiter_ready_since = None
-        initial_pose = None
+        landing_start = None
+        touchdown_stable_since = None
         initial_x = float(initial_local.x)
         initial_y = float(initial_local.y)
         initial_z = float(initial_local.z)
@@ -631,31 +722,19 @@ class DynamicRun:
             along = float(state.local.y) - initial_y
             cross = float(state.local.x) - initial_x
             altitude_gain = initial_z - float(state.local.z)
-            latest_pose = self.aero.pose_samples[-1] if self.aero.pose_samples else None
-            if initial_pose is None and latest_pose is not None:
-                initial_pose = dict(latest_pose)
-            pose_is_fresh = latest_pose is not None and now - latest_pose["wall_time_s"] <= 0.5
-            gazebo_along = (
-                latest_pose["x_m"] - initial_pose["x_m"]
-                if pose_is_fresh and initial_pose is not None else float("nan")
-            )
-            gazebo_cross = (
-                latest_pose["y_m"] - initial_pose["y_m"]
-                if pose_is_fresh and initial_pose is not None else float("nan")
-            )
-            gazebo_altitude_gain = (
-                latest_pose["z_m"] - initial_pose["z_m"]
-                if pose_is_fresh and initial_pose is not None else float("nan")
-            )
             sample = {
                 "wall_time_s": now,
+                "sim_time_s": float(getattr(state.local, "time_boot_ms", 0)) * 1e-3,
                 "elapsed_s": now - start,
                 "along_track_m": along,
                 "cross_track_m": cross,
                 "altitude_gain_m": altitude_gain,
-                "gazebo_along_track_m": gazebo_along,
-                "gazebo_cross_track_m": gazebo_cross,
-                "gazebo_altitude_gain_m": gazebo_altitude_gain,
+                # During flight these aliases use the PX4 estimate only for
+                # event scheduling. They are replaced with Gazebo ground truth
+                # from the completed ULog before acceptance is evaluated.
+                "gazebo_along_track_m": along,
+                "gazebo_cross_track_m": cross,
+                "gazebo_altitude_gain_m": altitude_gain,
                 "vx_m_s": float(state.local.vx),
                 "vy_m_s": float(state.local.vy),
                 "vz_m_s": float(state.local.vz),
@@ -679,14 +758,14 @@ class DynamicRun:
             }
             samples.append(sample)
 
-            if self.scenario in ("takeoff", "flight", "route"):
+            if self.scenario in ("takeoff", "flight", "route", "standard", "landing"):
                 if (
                     rotation is None
                     and sample["pitch_deg"] > 2.0
                     and sample["groundspeed_m_s"] > 20.0
                 ):
                     rotation = dict(sample)
-                if liftoff is None and math.isfinite(sample["gazebo_altitude_gain_m"]):
+                if liftoff is None:
                     # Record the first plausible wheel-clear event at 0.5 m,
                     # but only confirm it after the aircraft reaches 2 m. This
                     # rejects a transient nose-wheel lift without delaying the
@@ -703,19 +782,9 @@ class DynamicRun:
                 # the original V3 behavior: both canards retain their fixed
                 # takeoff/cruise deflection after the runway state reaches FLY.
                 if self.scenario == "takeoff" \
-                        and math.isfinite(sample["gazebo_altitude_gain_m"]) \
-                        and sample["gazebo_altitude_gain_m"] >= 47.0:
-                    recent_aero = [
-                        aero for aero in self.aero.samples
-                        if now - aero["wall_time_s"] <= 0.75
-                    ]
-                    if len(recent_aero) >= 3 and all(
-                        3.5 <= aero["delta_doc_deg"][3] <= 4.5
-                        and 3.5 <= aero["theta_joint_deg"][6] <= 4.5
-                        and 3.5 <= aero["theta_joint_deg"][7] <= 4.5
-                        for aero in recent_aero
-                    ):
-                        break
+                        and sample["altitude_gain_m"] >= 47.0:
+                    # Canard truth is checked after shutdown from ULog.
+                    break
                 elif self.scenario == "flight" and loiter_start is None:
                     # Do not force a loiter transition while the takeoff climb
                     # still carries several m/s of vertical speed. Require a
@@ -723,8 +792,7 @@ class DynamicRun:
                     # the test measures normal turning flight rather than a
                     # climb-to-hold step transient.
                     loiter_ready = (
-                        math.isfinite(sample["gazebo_altitude_gain_m"])
-                        and 47.0 <= sample["gazebo_altitude_gain_m"] <= 55.0
+                        47.0 <= sample["altitude_gain_m"] <= 55.0
                         and abs(sample["vz_m_s"]) <= 1.0
                     )
                     if loiter_ready:
@@ -746,12 +814,56 @@ class DynamicRun:
                     and state.mission_seq > ROUTE_LAST_WAYPOINT_SEQUENCE
                 ):
                     break
+                elif self.scenario == "standard" and state.mission_seq >= 18:
+                    if landing_start is None:
+                        landing_start = now
+                    if self.through_touchdown:
+                        touchdown_stable = (
+                            sample["landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                            and sample["groundspeed_m_s"] < 1.0
+                            and sample["altitude_gain_m"] < 1.0
+                        )
+                        if touchdown_stable:
+                            touchdown_stable_since = touchdown_stable_since or now
+                        else:
+                            touchdown_stable_since = None
+                        if (
+                            touchdown_stable_since is not None
+                            and now - touchdown_stable_since >= 2.0
+                        ) or now - landing_start >= 90.0:
+                            break
+                    else:
+                        # Retain the approach and first low-altitude segment for
+                        # coefficient validation without requiring touchdown.
+                        if (
+                            sample["altitude_gain_m"] <= 5.0
+                            or sample["landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                            or now - landing_start >= 45.0
+                        ):
+                            break
+                elif self.scenario == "landing" and state.mission_seq >= 2:
+                    if landing_start is None:
+                        landing_start = now
+                    touchdown_stable = (
+                        sample["landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                        and sample["groundspeed_m_s"] < 1.0
+                        and sample["altitude_gain_m"] < 1.0
+                    )
+                    if touchdown_stable:
+                        touchdown_stable_since = touchdown_stable_since or now
+                    else:
+                        touchdown_stable_since = None
+                    if (
+                        touchdown_stable_since is not None
+                        and now - touchdown_stable_since >= 2.0
+                    ) or now - landing_start >= 90.0:
+                        break
             elif self.scenario == "taxi" and along >= 210.0:
                 break
 
         if not samples:
             raise RuntimeError("no complete telemetry samples collected")
-        return self._evaluate(samples, rotation, liftoff, loiter_start)
+        return samples, rotation, liftoff, loiter_start
 
     def _evaluate(
         self,
@@ -940,17 +1052,19 @@ class DynamicRun:
                 "liftoff_before_45m_s": liftoff is not None and liftoff["airspeed_m_s"] <= 45.0,
                 "ground_cross_track_below_3m": math.isfinite(ground_truth_cross_track_max)
                 and ground_truth_cross_track_max < 3.0,
-                "takeoff_truth_pitch_below_12deg": math.isfinite(takeoff_truth_pitch_max)
-                and takeoff_truth_pitch_max <= 12.0,
+                "takeoff_truth_pitch_below_8_5deg": math.isfinite(takeoff_truth_pitch_max)
+                and takeoff_truth_pitch_max <= 8.5,
                 "climbed_10m": metrics["gazebo_altitude_final_m"] >= 10.0,
                 "canards_deployed_at_takeoff": math.isfinite(canard_takeoff_peak_deg)
-                and 3.5 <= canard_takeoff_peak_deg <= 4.5,
+                and self.expected_canard_deg - 0.5 <= canard_takeoff_peak_deg <= self.expected_canard_deg + 0.5,
                 "canard_pair_synchronized": math.isfinite(canard_pair_max_error_deg)
                 and canard_pair_max_error_deg < 0.25,
-                "canards_hold_v3_cruise_deflection": math.isfinite(cruise_canard_min_deg)
+                ("canards_hold_v3_cruise_deflection"
+                 if self.expected_canard_deg == 4.0
+                 else "canards_hold_expected_cruise_deflection"): math.isfinite(cruise_canard_min_deg)
                 and math.isfinite(cruise_canard_max_deg)
-                and cruise_canard_min_deg >= 3.5
-                and cruise_canard_max_deg <= 4.5,
+                and cruise_canard_min_deg >= self.expected_canard_deg - 0.5
+                and cruise_canard_max_deg <= self.expected_canard_deg + 0.5,
             }
         elif self.scenario == "route":
             ground_samples = [
@@ -1100,8 +1214,8 @@ class DynamicRun:
                 "liftoff_before_45m_s": liftoff is not None and liftoff["airspeed_m_s"] <= 45.0,
                 "ground_cross_track_below_3m": math.isfinite(metrics["ground_cross_track_max_abs_m"])
                 and metrics["ground_cross_track_max_abs_m"] < 3.0,
-                "takeoff_truth_pitch_below_12deg": math.isfinite(metrics["takeoff_truth_pitch_max_abs_deg"])
-                and metrics["takeoff_truth_pitch_max_abs_deg"] <= 12.0,
+                "takeoff_truth_pitch_below_8_5deg": math.isfinite(metrics["takeoff_truth_pitch_max_abs_deg"])
+                and metrics["takeoff_truth_pitch_max_abs_deg"] <= 8.5,
                 "route_waypoints_completed": metrics["mission_sequence_max"] > ROUTE_LAST_WAYPOINT_SEQUENCE,
                 "route_track_rms_below_60m": math.isfinite(track_rms) and track_rms < 60.0,
                 "route_track_p95_below_120m": math.isfinite(track_p95) and track_p95 < 120.0,
@@ -1118,11 +1232,239 @@ class DynamicRun:
                 and metrics["route_roll_max_abs_deg"] < 35.0
                 and metrics["route_roll_setpoint_max_abs_deg"] <= 30.5
                 and metrics["route_pitch_max_abs_deg"] < 15.0,
-                "canards_hold_v3_cruise_deflection": math.isfinite(metrics["route_canard_min_deg"])
+                ("canards_hold_v3_cruise_deflection"
+                 if self.expected_canard_deg == 4.0
+                 else "canards_hold_expected_cruise_deflection"): math.isfinite(metrics["route_canard_min_deg"])
                 and math.isfinite(metrics["route_canard_max_deg"])
-                and metrics["route_canard_min_deg"] >= 3.5
-                and metrics["route_canard_max_deg"] <= 4.5,
+                and metrics["route_canard_min_deg"] >= self.expected_canard_deg - 0.5
+                and metrics["route_canard_max_deg"] <= self.expected_canard_deg + 0.5,
             }
+        elif self.scenario == "landing":
+            airborne = [sample for sample in samples if sample["gazebo_altitude_gain_m"] >= 5.0]
+            landing_samples = [sample for sample in samples if sample["mission_seq"] >= 2]
+            contact_index = next(
+                (
+                    index for index, sample in enumerate(landing_samples)
+                    if sample["gazebo_altitude_gain_m"] <= 0.55
+                ),
+                None,
+            )
+            contact = landing_samples[contact_index] if contact_index is not None else None
+            post_contact = landing_samples[contact_index:] if contact_index is not None else []
+            takeoff_truth = [
+                sample for sample in samples
+                if sample["mission_seq"] == 0 and sample["gazebo_altitude_gain_m"] <= 20.0
+            ]
+            metrics = {
+                "rotation": rotation,
+                "liftoff": liftoff,
+                "mission_sequence_max": max(sample["mission_seq"] for sample in samples),
+                "takeoff_truth_pitch_max_abs_deg": max(
+                    (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in takeoff_truth),
+                    default=float("nan"),
+                ),
+                "airborne_roll_max_abs_deg": max(
+                    (abs(sample["roll_deg"]) for sample in airborne), default=float("nan")
+                ),
+                "airborne_pitch_max_abs_deg": max(
+                    (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in airborne),
+                    default=float("nan"),
+                ),
+                "touchdown_detected": contact is not None,
+                "touchdown_vertical_speed_m_s": contact["vz_m_s"] if contact else float("nan"),
+                "touchdown_groundspeed_m_s": contact["groundspeed_m_s"] if contact else float("nan"),
+                "post_touchdown_roll_max_abs_deg": max(
+                    (abs(sample["roll_deg"]) for sample in post_contact), default=float("nan")
+                ),
+                "post_touchdown_pitch_max_abs_deg": max(
+                    (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in post_contact),
+                    default=float("nan"),
+                ),
+                "post_touchdown_altitude_min_m": min(
+                    (sample["gazebo_altitude_gain_m"] for sample in post_contact), default=float("nan")
+                ),
+                "final_landed_state": samples[-1]["landed_state"],
+                "final_groundspeed_m_s": samples[-1]["groundspeed_m_s"],
+                "final_altitude_m": samples[-1]["gazebo_altitude_gain_m"],
+            }
+            checks = {
+                "rotation_detected": rotation is not None,
+                "liftoff_detected_from_gazebo_truth": liftoff is not None,
+                "takeoff_truth_pitch_below_8_5deg": math.isfinite(
+                    metrics["takeoff_truth_pitch_max_abs_deg"]
+                ) and metrics["takeoff_truth_pitch_max_abs_deg"] <= 8.5,
+                "landing_item_reached": metrics["mission_sequence_max"] >= 2,
+                "touchdown_detected": metrics["touchdown_detected"],
+                "touchdown_sink_rate_below_1m_s": math.isfinite(
+                    metrics["touchdown_vertical_speed_m_s"]
+                ) and metrics["touchdown_vertical_speed_m_s"] <= 1.0,
+                "touchdown_attitude_remains_upright": math.isfinite(
+                    metrics["post_touchdown_roll_max_abs_deg"]
+                ) and metrics["post_touchdown_roll_max_abs_deg"] < 15.0
+                and metrics["post_touchdown_pitch_max_abs_deg"] < 20.0,
+                "touchdown_does_not_fall_through_ground": math.isfinite(
+                    metrics["post_touchdown_altitude_min_m"]
+                ) and metrics["post_touchdown_altitude_min_m"] > -0.5,
+                "landing_stops_and_reports_on_ground":
+                metrics["final_landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                and metrics["final_groundspeed_m_s"] < 1.0,
+            }
+        elif self.scenario == "standard":
+            plan_payload = json.loads(self.standard_plan.read_text(encoding="utf-8-sig"))
+            home = plan_payload["mission"]["plannedHomePosition"]
+            takeoff_params = plan_payload["mission"]["items"][0]["params"]
+            takeoff_north_m = (float(takeoff_params[4]) - float(home[0])) * 111_111.0
+            takeoff_east_m = (
+                (float(takeoff_params[5]) - float(home[1])) * 111_111.0
+                * math.cos(math.radians(float(home[0])))
+            )
+            runway_heading_rad = math.atan2(takeoff_east_m, takeoff_north_m)
+            airborne = [sample for sample in samples if sample["gazebo_altitude_gain_m"] >= 5.0]
+            airborne_start = airborne[0]["wall_time_s"] if airborne else float("inf")
+            airborne_end = airborne[-1]["wall_time_s"] if airborne else float("-inf")
+            airborne_aero = [
+                sample for sample in self.aero.samples
+                if airborne_start <= sample["wall_time_s"] <= airborne_end
+            ]
+            takeoff_truth = [
+                sample for sample in samples
+                if sample["gazebo_altitude_gain_m"] <= 20.0 and sample["mission_seq"] == 0
+            ]
+            ground_samples = [
+                sample for sample in samples
+                if liftoff is not None and sample["wall_time_s"] <= liftoff["wall_time_s"]
+            ]
+            runway_cross_track = [
+                -math.sin(runway_heading_rad) * sample["gazebo_cross_track_m"]
+                + math.cos(runway_heading_rad) * sample["gazebo_along_track_m"]
+                for sample in ground_samples
+            ]
+            canard_values = [
+                value
+                for aero in airborne_aero
+                for value in (
+                    aero["delta_doc_deg"][3], aero["theta_joint_deg"][6],
+                    aero["theta_joint_deg"][7],
+                )
+            ]
+            metrics = {
+                "rotation": rotation,
+                "liftoff": liftoff,
+                "mission_sequence_max": max(sample["mission_seq"] for sample in samples),
+                "elapsed_wall_s": samples[-1]["elapsed_s"],
+                "elapsed_sim_s": samples[-1]["sim_time_s"] - samples[0]["sim_time_s"],
+                "airborne_sample_count": len(airborne),
+                "aero_truth_sample_count": len(airborne_aero),
+                "runway_heading_deg": math.degrees(runway_heading_rad),
+                "ground_cross_track_max_abs_m": max(
+                    (abs(value) for value in runway_cross_track),
+                    default=float("nan"),
+                ),
+                "takeoff_truth_pitch_max_abs_deg": max(
+                    (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in takeoff_truth),
+                    default=float("nan"),
+                ),
+                "airborne_altitude_min_m": min(
+                    (sample["gazebo_altitude_gain_m"] for sample in airborne), default=float("nan")
+                ),
+                "airborne_altitude_max_m": max(
+                    (sample["gazebo_altitude_gain_m"] for sample in airborne), default=float("nan")
+                ),
+                "airborne_airspeed_min_m_s": min(
+                    (sample["airspeed_m_s"] for sample in airborne), default=float("nan")
+                ),
+                "airborne_airspeed_max_m_s": max(
+                    (sample["airspeed_m_s"] for sample in airborne), default=float("nan")
+                ),
+                "airborne_roll_max_abs_deg": max(
+                    (abs(sample["roll_deg"]) for sample in airborne), default=float("nan")
+                ),
+                "airborne_pitch_max_abs_deg": max(
+                    (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in airborne),
+                    default=float("nan"),
+                ),
+                "airborne_alpha_range_deg": [
+                    min((aero["alpha_deg"] for aero in airborne_aero), default=float("nan")),
+                    max((aero["alpha_deg"] for aero in airborne_aero), default=float("nan")),
+                ],
+                "airborne_beta_range_deg": [
+                    min((aero["beta_deg"] for aero in airborne_aero), default=float("nan")),
+                    max((aero["beta_deg"] for aero in airborne_aero), default=float("nan")),
+                ],
+                "airborne_canard_min_deg": min(canard_values, default=float("nan")),
+                "airborne_canard_max_deg": max(canard_values, default=float("nan")),
+            }
+            if self.through_touchdown:
+                landing_samples = [sample for sample in samples if sample["mission_seq"] >= 18]
+                contact_index = next(
+                    (
+                        index for index, sample in enumerate(landing_samples)
+                        if sample["gazebo_altitude_gain_m"] <= 0.55
+                    ),
+                    None,
+                )
+                contact = landing_samples[contact_index] if contact_index is not None else None
+                post_contact = landing_samples[contact_index:] if contact_index is not None else []
+                metrics.update({
+                    "touchdown_detected": contact is not None,
+                    "touchdown_vertical_speed_m_s": contact["vz_m_s"] if contact else float("nan"),
+                    "touchdown_groundspeed_m_s": contact["groundspeed_m_s"] if contact else float("nan"),
+                    "post_touchdown_roll_max_abs_deg": max(
+                        (abs(sample["roll_deg"]) for sample in post_contact), default=float("nan")
+                    ),
+                    "post_touchdown_pitch_max_abs_deg": max(
+                        (abs(sample.get("gazebo_pitch_deg", sample["pitch_deg"])) for sample in post_contact),
+                        default=float("nan"),
+                    ),
+                    "post_touchdown_altitude_min_m": min(
+                        (sample["gazebo_altitude_gain_m"] for sample in post_contact), default=float("nan")
+                    ),
+                    "final_landed_state": samples[-1]["landed_state"],
+                    "final_groundspeed_m_s": samples[-1]["groundspeed_m_s"],
+                    "final_altitude_m": samples[-1]["gazebo_altitude_gain_m"],
+                })
+            checks = {
+                "rotation_detected": rotation is not None,
+                "liftoff_detected_from_gazebo_truth": liftoff is not None,
+                "liftoff_before_45m_s": liftoff is not None and liftoff["airspeed_m_s"] <= 45.0,
+                "takeoff_truth_pitch_below_8_5deg": math.isfinite(
+                    metrics["takeoff_truth_pitch_max_abs_deg"]
+                ) and metrics["takeoff_truth_pitch_max_abs_deg"] <= 8.5,
+                "ground_cross_track_below_3m": math.isfinite(
+                    metrics["ground_cross_track_max_abs_m"]
+                ) and metrics["ground_cross_track_max_abs_m"] < 3.0,
+                "reached_plan_landing_item_18": metrics["mission_sequence_max"] >= 18,
+                "airborne_truth_available": len(airborne_aero) >= 1000,
+                "airborne_attitude_bounded": math.isfinite(metrics["airborne_roll_max_abs_deg"])
+                and metrics["airborne_roll_max_abs_deg"] < 35.0
+                and metrics["airborne_pitch_max_abs_deg"] < 15.0,
+                "airborne_airspeed_bounded": math.isfinite(metrics["airborne_airspeed_min_m_s"])
+                and metrics["airborne_airspeed_min_m_s"] >= 25.0
+                and metrics["airborne_airspeed_max_m_s"] <= 60.0,
+                ("canards_hold_v3_airborne_deflection"
+                 if self.expected_canard_deg == 4.0
+                 else "canards_hold_expected_airborne_deflection"): math.isfinite(
+                    metrics["airborne_canard_min_deg"]
+                ) and metrics["airborne_canard_min_deg"] >= self.expected_canard_deg - 0.5
+                and metrics["airborne_canard_max_deg"] <= self.expected_canard_deg + 0.5,
+            }
+            if self.through_touchdown:
+                checks.update({
+                    "touchdown_detected": metrics["touchdown_detected"],
+                    "touchdown_sink_rate_below_1m_s": math.isfinite(
+                        metrics["touchdown_vertical_speed_m_s"]
+                    ) and metrics["touchdown_vertical_speed_m_s"] <= 1.0,
+                    "touchdown_attitude_remains_upright": math.isfinite(
+                        metrics["post_touchdown_roll_max_abs_deg"]
+                    ) and metrics["post_touchdown_roll_max_abs_deg"] < 15.0
+                    and metrics["post_touchdown_pitch_max_abs_deg"] < 20.0,
+                    "touchdown_does_not_fall_through_ground": math.isfinite(
+                        metrics["post_touchdown_altitude_min_m"]
+                    ) and metrics["post_touchdown_altitude_min_m"] > -0.5,
+                    "landing_stops_and_reports_on_ground":
+                    metrics["final_landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                    and metrics["final_groundspeed_m_s"] < 1.0,
+                })
         else:
             ground_samples = [
                 sample for sample in samples
@@ -1218,8 +1560,8 @@ class DynamicRun:
                 "liftoff_before_45m_s": liftoff is not None and liftoff["airspeed_m_s"] <= 45.0,
                 "ground_cross_track_below_3m": math.isfinite(metrics["ground_cross_track_max_abs_m"])
                 and metrics["ground_cross_track_max_abs_m"] < 3.0,
-                "takeoff_truth_pitch_below_12deg": math.isfinite(takeoff_truth_pitch_max)
-                and takeoff_truth_pitch_max <= 12.0,
+                "takeoff_truth_pitch_below_8_5deg": math.isfinite(takeoff_truth_pitch_max)
+                and takeoff_truth_pitch_max <= 8.5,
                 "auto_loiter_entered_above_50m": loiter_start is not None,
                 "stable_flight_observed_at_least_24s": cruise_duration >= 24.0,
                 # Use the same bounded low-altitude envelope as the route
@@ -1241,10 +1583,12 @@ class DynamicRun:
                 and math.isfinite(metrics["cruise_beta_max_abs_deg"])
                 and metrics["cruise_alpha_max_abs_deg"] < 12.0
                 and metrics["cruise_beta_max_abs_deg"] < 5.0,
-                "canards_hold_v3_cruise_deflection": math.isfinite(metrics["cruise_canard_min_deg"])
+                ("canards_hold_v3_cruise_deflection"
+                 if self.expected_canard_deg == 4.0
+                 else "canards_hold_expected_cruise_deflection"): math.isfinite(metrics["cruise_canard_min_deg"])
                 and math.isfinite(metrics["cruise_canard_max_deg"])
-                and metrics["cruise_canard_min_deg"] >= 3.5
-                and metrics["cruise_canard_max_deg"] <= 4.5,
+                and metrics["cruise_canard_min_deg"] >= self.expected_canard_deg - 0.5
+                and metrics["cruise_canard_max_deg"] <= self.expected_canard_deg + 0.5,
             }
         return {
             "status": "PASS" if all(checks.values()) else "FAIL",
@@ -1267,23 +1611,72 @@ class DynamicRun:
         }
 
     def execute(self) -> dict:
+        mission: list[dict] = []
+        collected: tuple[list[dict], dict | None, dict | None, float | None] | None = None
         try:
             self.start()
             global_position, local_position = self.wait_for_position()
             if self.scenario == "static":
                 mission = []
             else:
-                mission = self.upload_eastbound_mission(global_position)
+                mission = self.upload_standard_plan() if self.scenario == "standard" \
+                    else self.upload_eastbound_mission(global_position)
                 self.arm_and_start_mission()
-            report = self.collect(local_position)
-            report["mission"] = mission
-            report["make_log"] = str(self.make_log_path)
-            return report
+            collected = self.collect(local_position)
         finally:
             self.stop()
 
+        if collected is None:
+            raise RuntimeError("dynamic run stopped before telemetry collection completed")
+        samples, rotation, liftoff, loiter_start = collected
+        new_logs = sorted(
+            set(ROOTFS.glob("log/**/*.ulg")) - self.ulog_files_before,
+            key=lambda path: path.stat().st_mtime,
+        )
+        if not new_logs:
+            raise RuntimeError("PX4 stopped without producing a new ULog for offline truth analysis")
+        self.aero.load(new_logs[-1], samples)
+
+        # Re-detect the events after the PX4-estimator aliases have been
+        # replaced with ULog Gazebo truth. No diagnostic process was active
+        # while the flight-control loop was running.
+        rotation = next(
+            (
+                dict(sample) for sample in samples
+                if sample.get("gazebo_pitch_deg", sample["pitch_deg"]) > 2.0
+                and sample["groundspeed_m_s"] > 20.0
+            ),
+            rotation,
+        )
+        liftoff = None
+        liftoff_candidate = None
+        for sample in samples:
+            altitude = sample["gazebo_altitude_gain_m"]
+            if liftoff_candidate is None and altitude > 0.5 and sample["groundspeed_m_s"] > 20.0:
+                liftoff_candidate = dict(sample)
+            elif liftoff_candidate is not None and altitude < 0.25:
+                liftoff_candidate = None
+            if liftoff_candidate is not None and altitude > 2.0:
+                liftoff = liftoff_candidate
+                break
+
+        report = self._evaluate(samples, rotation, liftoff, loiter_start)
+        report["mission"] = mission
+        report["make_log"] = str(self.make_log_path)
+        report["offline_ulog"] = str(new_logs[-1])
+        report["diagnostic_mode"] = "post-flight ULog only; no external Gazebo topic observers"
+        if self.scenario == "standard":
+            report["plan"] = str(self.standard_plan)
+            # The ULog is the authoritative full-rate artifact. Avoid writing
+            # tens of thousands of duplicated dictionaries to the JSON report.
+            report["samples"] = []
+            report["aero_samples"] = []
+            report["propulsion_samples"] = []
+            report["gazebo_pose_samples"] = []
+            report["offline_series_storage"] = "ULog"
+        return report
+
     def stop(self) -> None:
-        self.aero.close()
         if self.make_process is not None:
             try:
                 run([str(PX4_BIN / "px4-commander"), "disarm", "-f"], timeout=3.0, check=False)
@@ -1320,7 +1713,9 @@ class DynamicRun:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scenario", choices=("static", "taxi", "takeoff", "flight", "route"))
+    parser.add_argument(
+        "scenario", choices=("static", "taxi", "takeoff", "flight", "route", "landing", "standard")
+    )
     parser.add_argument(
         "--step-size", type=float, default=0.002,
         help="Gazebo physics step [s]; V8's validated real-time operating point is 0.002",
@@ -1351,20 +1746,52 @@ def main() -> None:
         "--initial-yaw-deg", type=float, default=0.0,
         help="Gazebo ENU spawn yaw [deg], useful for a taxi steering disturbance test",
     )
+    parser.add_argument(
+        "--plan", type=Path, default=DEFAULT_STANDARD_PLAN,
+        help="QGroundControl .plan used by the standard scenario",
+    )
+    parser.add_argument(
+        "--make-target", default="gz_honghu_wing_150kg_v8",
+        help="SITL make target; defaults to the stable production V8",
+    )
+    parser.add_argument(
+        "--expected-canard-deg", type=float, default=6.0,
+        help="expected airborne canard angle used only by acceptance checks",
+    )
+    parser.add_argument(
+        "--through-touchdown", action="store_true",
+        help="for the standard plan, continue through touchdown and require a stable stop",
+    )
+    parser.add_argument(
+        "--physics-engine",
+        choices=("gz-physics-dartsim-plugin", "gz-physics-bullet-featherstone-plugin"),
+        help="temporary Gazebo physics-engine plugin; omitted keeps the normal DART default",
+    )
+    parser.add_argument("--spawn-x", type=float, default=0.0, help="test-only Gazebo ENU spawn X [m]")
+    parser.add_argument("--spawn-y", type=float, default=0.0, help="test-only Gazebo ENU spawn Y [m]")
     parser.add_argument("--no-assert", action="store_true", help="write measurements without a failing exit code")
     arguments = parser.parse_args()
     if not 1024 <= arguments.mavlink_port <= 62535:
         parser.error("--mavlink-port must be in 1024..62535")
     if arguments.coincident_takeoff and arguments.scenario not in ("takeoff", "flight"):
         parser.error("--coincident-takeoff is supported only by takeoff and flight scenarios")
-    if abs(arguments.initial_yaw_deg) > 30.0:
+    if arguments.scenario != "standard" and abs(arguments.initial_yaw_deg) > 30.0:
         parser.error("--initial-yaw-deg must be within +/-30 degrees")
+    arguments.plan = arguments.plan.resolve()
+    if arguments.scenario == "standard" and not arguments.plan.exists():
+        parser.error(f"standard plan does not exist: {arguments.plan}")
+    if arguments.through_touchdown and arguments.scenario != "standard":
+        parser.error("--through-touchdown is supported only by the standard scenario")
+    if not arguments.make_target.startswith("gz_honghu_wing_"):
+        parser.error("--make-target must be a Honghu Gazebo target")
     default_timeouts = {
         "static": 62.0,
         "taxi": 70.0,
         "takeoff": 110.0,
         "flight": 150.0,
         "route": 190.0,
+        "landing": 300.0,
+        "standard": 1000.0,
     }
     timeout_s = arguments.timeout or default_timeouts[arguments.scenario]
     parameter_overrides: dict[str, float] = {}
@@ -1388,6 +1815,13 @@ def main() -> None:
         arguments.mavlink_port,
         arguments.coincident_takeoff,
         arguments.initial_yaw_deg,
+        arguments.plan,
+        arguments.make_target,
+        arguments.expected_canard_deg,
+        arguments.through_touchdown,
+        arguments.physics_engine,
+        arguments.spawn_x,
+        arguments.spawn_y,
     )
     report = runner.execute()
     if arguments.json:

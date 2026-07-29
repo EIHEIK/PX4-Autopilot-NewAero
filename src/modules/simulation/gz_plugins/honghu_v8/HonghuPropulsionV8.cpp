@@ -119,9 +119,13 @@ public:
 
         msgs::Double speed_message; speed_message.set_data(sample.rpm*2.0*M_PI/60.0); _speed_pub.Publish(speed_message);
         if(now>=_next_publish){
-            _next_publish=now+0.01;
+            // Flight-recorder diagnostics only; propulsion force application
+            // above remains at the physics update rate.
+            _next_publish=now+0.02;
             msgs::Double_V state;
             for(double value:{target,_state,altitude,airspeed,sample.rpm,sample.thrust_newton,sample.torque_nm,fuel,static_cast<double>(flags)}){state.add_data(value);}
+            state.add_data(now*1e6);
+            state.add_data(static_cast<double>(_diagnostic_sequence++));
             _diag_pub.Publish(state);
         }
     }
@@ -130,6 +134,7 @@ private:
     Model _model{kNullEntity};Entity _link{kNullEntity};bool _valid{false};
     std::atomic<double> _target{0.0};std::atomic<bool> _command_received{false};
     double _state{0.0},_tau_up{0.5},_tau_down{0.3},_reference_altitude{0.0},_next_publish{0.0},_next_subscription_refresh{0.0};
+    uint32_t _diagnostic_sequence{0};
     std::string _command_topic;
     math::Vector3d _engine_point{-1.23,0.0,0.12},_thrust_direction{1.0,0.0,0.0};
     double _propeller_rotation_sign{1.0};

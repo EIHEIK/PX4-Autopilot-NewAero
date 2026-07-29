@@ -361,7 +361,18 @@ void FixedwingRateControl::Run()
 				_vehicle_attitude_setpoint_sub.update(&_attitude_sp);
 				float pitch_rate_ff = _param_fw_pr_ff.get();
 
-				if (_param_fw_pr_ff_rwto.get() >= 0.f
+				if (_param_fw_pr_ff_lnd.get() >= 0.f
+				    && _attitude_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING
+				    && _attitude_sp.fw_control_yaw_wheel
+				    && body_rates_setpoint(1) > 0.f) {
+					// Landing flare needs its own pitch authority. Historically the
+					// runway-takeoff breakaway FF was also selected here because both
+					// phases enable wheel control. Keep the proven flare response, but
+					// make the phase contract explicit and independent from takeoff.
+					pitch_rate_ff = _param_fw_pr_ff_lnd.get();
+
+				} else if (_param_fw_pr_ff_rwto.get() >= 0.f
+				    && _attitude_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF
 				    && _attitude_sp.fw_control_yaw_wheel
 				    && body_rates_setpoint(1) > 0.f) {
 					// A runway aircraft may need a larger initial elevator command to

@@ -150,7 +150,7 @@ void LandDetector::Run()
 
 	UpdateVehicleAtRest();
 
-	const bool at_rest = landDetected && _at_rest;
+	const bool at_rest = landDetected && _get_at_rest_state();
 
 	// publish at 1 Hz, very first time, or when the result has changed
 	if ((hrt_elapsed_time(&_land_detected.timestamp) >= 1_s) ||

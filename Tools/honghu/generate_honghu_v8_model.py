@@ -189,7 +189,7 @@ def nose_gear_xml():
       <gravity>true</gravity>
 {inertia_xml(0.15, (0, 0, 0), (0.000304, 0.000145, 0.000304))}
       <visual name="wheel_visual"><pose>0.645148 0 0.457844 0 0 0</pose><geometry><mesh><uri>meshes/steeringwheel.dae</uri></mesh></geometry></visual>
-{wheel_contact_xml("nose_wheel_collision", "0.0439", "0.1363", "1.2", "3.0")}
+{wheel_contact_xml("nose_wheel_collision", "0.0439", "0.1363", "1.0", "1.0")}
     </link>"""
 
 
@@ -213,14 +213,9 @@ SENSORS = """
         <always_on>1</always_on><update_rate>50</update_rate>
         <air_pressure><pressure><noise type="gaussian"><mean>0</mean><stddev>0.01</stddev></noise></pressure></air_pressure>
       </sensor>
-      <sensor name="magnetometer_sensor" type="magnetometer">
-        <always_on>1</always_on><update_rate>100</update_rate>
-        <magnetometer>
-          <x><noise type="gaussian"><stddev>0.0001</stddev></noise></x>
-          <y><noise type="gaussian"><stddev>0.0001</stddev></noise></y>
-          <z><noise type="gaussian"><stddev>0.0001</stddev></noise></z>
-        </magnetometer>
-      </sensor>
+      <!-- V8 uses HonghuMagnetometerV8 below instead of Harmonic's historical
+           NED/ENU compatibility path. The custom publisher retains the topic
+           expected by the unchanged PX4 bridge. -->
       <sensor name="navsat_sensor" type="navsat"><always_on>1</always_on><update_rate>30</update_rate></sensor>"""
 
 
@@ -280,13 +275,13 @@ def generate():
 {controllers}
     <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
       <joint_name>nose_steering_joint</joint_name><sub_topic>servo_8</sub_topic>
-      <!-- The steering actuator must overcome the tyre's static contact moment.
-           The previous 5 N.m/rad, +/-20 N.m controller produced essentially no
-           joint motion under aircraft weight. Keep the command below the
-           joint's 300 N.m structural effort limit. Derivative damping limits
-           transients, while the bounded integral removes tyre-friction bias. -->
-      <p_gain>1000</p_gain><i_gain>500</i_gain><d_gain>30</d_gain>
-      <i_max>80</i_max><i_min>-80</i_min><cmd_max>200</cmd_max><cmd_min>-200</cmd_min>
+      <!-- A high-stiffness 1000/500/30 controller excited the rigid tyre/joint
+           constraint and injected non-physical lateral IMU acceleration.  The
+           bounded, lightly damped controller below still overcomes static tyre
+           friction, but keeps IMU acceleration consistent with pose-derived
+           acceleration during steering. -->
+      <p_gain>500</p_gain><i_gain>200</i_gain><d_gain>1</d_gain>
+      <i_max>40</i_max><i_min>-40</i_min><cmd_max>100</cmd_max><cmd_min>-100</cmd_min>
     </plugin>
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
       {"".join(f"<joint_name>servo_{i}</joint_name>" for i in range(8))}
@@ -305,6 +300,12 @@ def generate():
       <!-- Front-view CCW propeller: omega is +X, airframe reaction torque is -X. -->
       <propeller_rotation_sign>1</propeller_rotation_sign>
       <tau_up_s>0.5</tau_up_s><tau_down_s>0.3</tau_down_s><reference_altitude_m>0</reference_altitude_m>
+    </plugin>
+    <plugin filename="libHonghuMagnetometerV8.so" name="honghu::v8::HonghuMagnetometerV8">
+      <link_name>base_link</link_name>
+      <!-- PX4 WMM-2020 at 28.5712315 N, 121.5759172 E, FRD/NED gauss. -->
+      <field_ned_gauss>0.346940371 -0.035562102 0.325102706</field_ned_gauss>
+      <update_rate_hz>100</update_rate_hz><noise_stddev_gauss>0.0001</noise_stddev_gauss>
     </plugin>
   </model>
 </sdf>

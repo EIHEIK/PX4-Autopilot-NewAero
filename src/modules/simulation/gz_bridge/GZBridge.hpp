@@ -53,6 +53,8 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/differential_pressure.h>
 #include <uORB/topics/distance_sensor.h>
+#include <uORB/topics/honghu_v8_aero_state.h>
+#include <uORB/topics/honghu_v8_propulsion_state.h>
 #include <uORB/topics/sensor_accel.h>
 #include <uORB/topics/sensor_gyro.h>
 #include <uORB/topics/sensor_gps.h>
@@ -79,6 +81,7 @@
 #include <gz/msgs/laserscan.pb.h>
 #include <gz/msgs/stringmsg.pb.h>
 #include <gz/msgs/scene.pb.h>
+#include <gz/msgs/double_v.pb.h>
 // Custom PX4 proto
 #include <opticalflow.pb.h>
 
@@ -119,6 +122,8 @@ private:
 	void laserScanCallback(const gz::msgs::LaserScan &msg);
 	void opticalFlowCallback(const px4::msgs::OpticalFlow &msg);
 	void magnetometerCallback(const gz::msgs::Magnetometer &msg);
+	void honghuAeroStateCallback(const gz::msgs::Double_V &msg);
+	void honghuPropulsionStateCallback(const gz::msgs::Double_V &msg);
 
 	static void rotateQuaternion(gz::math::Quaterniond &q_FRD_to_NED, const gz::math::Quaterniond q_FLU_to_ENU);
 
@@ -134,6 +139,8 @@ private:
 	uORB::Publication<vehicle_attitude_s>         _attitude_ground_truth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_global_position_s>  _gpos_ground_truth_pub{ORB_ID(vehicle_global_position_groundtruth)};
 	uORB::Publication<vehicle_local_position_s>   _lpos_ground_truth_pub{ORB_ID(vehicle_local_position_groundtruth)};
+	uORB::Publication<honghu_v8_aero_state_s>    _honghu_v8_aero_state_pub{ORB_ID(honghu_v8_aero_state)};
+	uORB::Publication<honghu_v8_propulsion_state_s> _honghu_v8_propulsion_state_pub{ORB_ID(honghu_v8_propulsion_state)};
 	uORB::PublicationMulti<sensor_gps_s>          _sensor_gps_pub{ORB_ID(sensor_gps)};
 	uORB::PublicationMulti<sensor_baro_s>         _sensor_baro_pub{ORB_ID(sensor_baro)};
 	uORB::PublicationMulti<sensor_accel_s>        _sensor_accel_pub{ORB_ID(sensor_accel)};

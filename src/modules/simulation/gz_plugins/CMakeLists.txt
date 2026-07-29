@@ -61,8 +61,8 @@ if (gz-transport_FOUND)
 
     # Add an alias target for each plugin
     if (TARGET GstCameraSystem)
-        add_custom_target(px4_gz_plugins ALL DEPENDS OpticalFlowSystem MovingPlatformController TemplatePlugin HonghuAeroTable HonghuAeroV8 HonghuPropulsionV8 GstCameraSystem)
+        add_custom_target(px4_gz_plugins ALL DEPENDS OpticalFlowSystem MovingPlatformController TemplatePlugin HonghuAeroTable HonghuAeroV8 HonghuPropulsionV8 HonghuMagnetometerV8 GstCameraSystem)
     else()
-        add_custom_target(px4_gz_plugins ALL DEPENDS OpticalFlowSystem MovingPlatformController TemplatePlugin HonghuAeroTable HonghuAeroV8 HonghuPropulsionV8)
+        add_custom_target(px4_gz_plugins ALL DEPENDS OpticalFlowSystem MovingPlatformController TemplatePlugin HonghuAeroTable HonghuAeroV8 HonghuPropulsionV8 HonghuMagnetometerV8)
     endif()
 endif()

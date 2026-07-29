@@ -40,6 +40,15 @@
 
 #include <px4_platform_common/getopt.h>
 
+namespace
+{
+bool isHonghuV8Model(const std::string &model_name)
+{
+	return model_name.rfind("honghu_wing_150kg_v8", 0) == 0
+	       || model_name.rfind("honghu_wing_100kg_v8_xiangyi_test", 0) == 0;
+}
+}
+
 #include <iostream>
 #include <string>
 
@@ -90,7 +99,7 @@ int GZBridge::init()
 	gz::transport::SubscribeOptions clock_options;
 	gz::transport::SubscribeOptions pose_options;
 
-	if (_model_name.rfind("honghu_wing_150kg_v8", 0) == 0) {
+	if (isHonghuV8Model(_model_name)) {
 		pose_options.SetMsgsPerSec(250);
 	}
 
@@ -185,6 +194,23 @@ int GZBridge::init()
 		return PX4_ERROR;
 	}
 
+	// V8-only truth diagnostics. These retain actual Gazebo joint feedback and
+	// the propulsion lag state in ULog so aerodynamic coefficient inversion is
+	// not forced to substitute actuator commands for physical surface angles.
+	if (isHonghuV8Model(_model_name)) {
+		const std::string diagnostic_root = "/model/" + _model_name + "/honghu_v8";
+
+		if (!_node.Subscribe(diagnostic_root + "/aero_state", &GZBridge::honghuAeroStateCallback, this)) {
+			PX4_ERR("failed to subscribe to V8 aerodynamic diagnostics");
+			return PX4_ERROR;
+		}
+
+		if (!_node.Subscribe(diagnostic_root + "/propulsion_state", &GZBridge::honghuPropulsionStateCallback, this)) {
+			PX4_ERR("failed to subscribe to V8 propulsion diagnostics");
+			return PX4_ERROR;
+		}
+	}
+
 	if (!_mixing_interface_esc.init(_model_name)) {
 		PX4_ERR("failed to init ESC output");
 		return PX4_ERROR;
@@ -209,12 +235,80 @@ int GZBridge::init()
 	return OK;
 }
 
+void GZBridge::honghuAeroStateCallback(const gz::msgs::Double_V &msg)
+{
+	// HonghuAeroV8::Publish layout: 15 primary states/coefs, 8 joint
+	// angles, 4 document deflections, 24 control contributions, 24 joint
+	// axis components, flags, source simulation time [us], sequence.
+	if (msg.data_size() < 76) {
+		return;
+	}
+
+	honghu_v8_aero_state_s report{};
+	report.timestamp = hrt_absolute_time();
+	report.timestamp_sample = msg.data_size() >= 78 && msg.data(76) >= 0.0
+				  ? static_cast<uint64_t>(msg.data(76) + 0.5)
+				  : report.timestamp;
+	report.airspeed_m_s = msg.data(0);
+	report.alpha_deg = msg.data(1);
+	report.beta_deg = msg.data(2);
+	report.rho_kg_m3 = msg.data(3);
+	report.alpha_dot_rad_s = msg.data(4);
+	report.beta_dot_rad_s = msg.data(5);
+
+	for (int index = 0; index < 3; ++index) {
+		report.body_rates_frd_rad_s[index] = msg.data(6 + index);
+	}
+
+	for (int index = 0; index < 6; ++index) {
+		report.coefficients[index] = msg.data(9 + index);
+	}
+
+	for (int index = 0; index < 8; ++index) {
+		report.joint_angles_deg[index] = msg.data(15 + index);
+	}
+
+	for (int index = 0; index < 4; ++index) {
+		report.delta_doc_deg[index] = msg.data(23 + index);
+	}
+
+	report.flags = static_cast<uint32_t>(msg.data(75) > 0.0 ? msg.data(75) : 0.0);
+	report.sequence = msg.data_size() >= 78 && msg.data(77) > 0.0
+			  ? static_cast<uint32_t>(msg.data(77)) : 0u;
+	_honghu_v8_aero_state_pub.publish(report);
+}
+
+void GZBridge::honghuPropulsionStateCallback(const gz::msgs::Double_V &msg)
+{
+	if (msg.data_size() < 9) {
+		return;
+	}
+
+	honghu_v8_propulsion_state_s report{};
+	report.timestamp = hrt_absolute_time();
+	report.timestamp_sample = msg.data_size() >= 11 && msg.data(9) >= 0.0
+				  ? static_cast<uint64_t>(msg.data(9) + 0.5)
+				  : report.timestamp;
+	report.target_throttle = msg.data(0);
+	report.filtered_throttle = msg.data(1);
+	report.altitude_m = msg.data(2);
+	report.airspeed_m_s = msg.data(3);
+	report.rpm = msg.data(4);
+	report.thrust_n = msg.data(5);
+	report.torque_nm = msg.data(6);
+	report.fuel_rate = msg.data(7);
+	report.flags = static_cast<uint32_t>(msg.data(8) > 0.0 ? msg.data(8) : 0.0);
+	report.sequence = msg.data_size() >= 11 && msg.data(10) > 0.0
+			  ? static_cast<uint32_t>(msg.data(10)) : 0u;
+	_honghu_v8_propulsion_state_pub.publish(report);
+}
+
 void GZBridge::clockCallback(const gz::msgs::Clock &msg)
 {
 	const uint64_t sim_time_us = static_cast<uint64_t>(msg.sim().sec()) * 1'000'000ULL
 				     + static_cast<uint64_t>(msg.sim().nsec()) / 1'000ULL;
 
-	if (_model_name.rfind("honghu_wing_150kg_v8", 0) == 0) {
+	if (isHonghuV8Model(_model_name)) {
 		// px4_clock_settime at every 0.5 ms physics tick is expensive enough to
 		// starve the remaining bridge callbacks.  Decimate on simulation time so
 		// updates remain exactly uniform, unlike wall-clock subscription
@@ -297,8 +391,9 @@ void GZBridge::magnetometerCallback(const gz::msgs::Magnetometer &msg)
 	report.device_id = id.devid;
 	report.temperature = this->_temperature;
 
-	// FIMEX: once we're on jetty or later
-	// The magnetometer plugin publishes in units of gauss and in a weird left handed coordinate system
+	// FIXME: once we're on Jetty or later, reassess this Harmonic compatibility path.
+	// The Harmonic magnetometer plugin publishes in gauss and uses a historical
+	// NED / left-handed convention.
 	// https://github.com/gazebosim/gz-sim/pull/2460
 	report.x = -msg.field_tesla().y();
 	report.y = -msg.field_tesla().x();
