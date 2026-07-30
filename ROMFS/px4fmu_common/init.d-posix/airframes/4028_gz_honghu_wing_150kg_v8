@@ -61,17 +61,20 @@ PX4_GZ_MAG_FIELD_Y=${PX4_GZ_MAG_FIELD_Y:=3.46940371e-05}
 PX4_GZ_MAG_FIELD_Z=${PX4_GZ_MAG_FIELD_Z:=-3.25102706e-05}
 export PX4_GZ_MAX_STEP_SIZE PX4_GZ_HOME_LAT PX4_GZ_HOME_LON PX4_GZ_HOME_ALT PX4_GZ_HOME_HEADING PX4_GZ_SET_HOME_COORDINATES PX4_GZ_MODEL_POSE PX4_GZ_MAG_FIELD_X PX4_GZ_MAG_FIELD_Y PX4_GZ_MAG_FIELD_Z
 
+
+# ---------------------------------------------------------------------------
+# 仿真传感器与发动机配置
+# ---------------------------------------------------------------------------
 param set-default SIM_GZ_EN 1
 param set-default SENS_EN_GPSSIM 1
 param set-default SENS_EN_MAGSIM 1
 param set-default SENS_EN_ARSPDSIM 1
-# HonghuMagnetometerV8 supplies an exact three-dimensional FRD field through
-# the unchanged official Harmonic bridge.
-
-# Airspeed and safety limits (tuned for simulation stability)
-# Critical taxi-test baseline parameters below use "param set" instead of
-# "param set-default" so stale parameters.bson values from earlier tuning runs
-# cannot override the known-good V6/V7 ground tracking baseline.
+param set-default SIM_GZ_EC_FUNC1 101 # 电机 1 油门
+param set SIM_GZ_EC_MIN1 0
+param set SIM_GZ_EC_MAX1 1000
+# ---------------------------------------------------------------------------
+# 空速与安全限制
+# ---------------------------------------------------------------------------
 param set FW_AIRSPD_STALL 30     # 失速空速 [m/s]
 param set FW_AIRSPD_MIN 32       # TECS 使用的最小可控空速 [m/s]，需不低于失速空速
 param set FW_AIRSPD_TRIM 40      # 巡航/配平空速 [m/s]
@@ -85,57 +88,60 @@ param set-default FW_T_CLMB_R_SP 4.0     # 默认爬升率设定 [m/s]
 param set-default FW_T_SINK_R_SP 3.0     # 默认下降率设定 [m/s]
 param set-default FW_T_SINK_MAX 3.0      # TECS 允许的最大下降率 [m/s]
 param set-default FW_T_SPDWEIGHT 1.0     # TECS 速度/高度平衡权重
-# Airborne height loop: retain both TECS and rate-loop integrators so unknown
-# real-aircraft trim can be learned, while adding enough damping and response
-# to reject the documented thrust-line pitching moment.
-param set FW_T_I_GAIN_PIT 0.05           # retained TECS pitch integrator; faster than the stable 0.03 probe
-param set FW_T_PTCH_DAMP 0.30            # full-route validation: damps turn/segment longitudinal oscillation without slowing the inner loop
-param set FW_T_ALT_TC 3.5                 # reduce the level-handoff height dip without exciting the phugoid
-param set FW_T_RLL2THR 20                 # bank-angle throttle compensation preserves height in sustained turns
-param set FW_P_LIM_MAX 10                # cruise authority; takeoff/landing limits use height triggers and timed transitions
+param set FW_T_I_GAIN_PIT 0.05 # 保留 TECS 俯仰积分器；比稳定的 0.03 探测更快
+param set FW_T_PTCH_DAMP 0.30 # 全航线验证：抑制转弯/航段纵向振荡，同时不减慢内回路
+param set FW_T_ALT_TC 3.5 # 减少平飞交接高度下沉，同时不激发长周期运动
+param set FW_T_RLL2THR 20 # 转弯坡度油门补偿，在持续转弯中保持高度
+param set-default FW_T_THR_LOW_HGT 30    # 低于该高度时启用更紧的 TECS 高度跟踪 [m]
+# ---------------------------------------------------------------------------
+# 俯仰控制
+# ---------------------------------------------------------------------------
+param set TRIM_PITCH -0.02 # 针对 V8 +6 deg 固定鸭翼重新配平；积分器保持活跃以学习未知实机配平值
+param set FW_P_LIM_MAX 10 # 巡航权限；起飞/降落限制使用高度触发和定时过渡
 param set-default FW_P_LIM_MIN -10       # 最大低头/俯冲设定 [deg]
-param set-default FW_TKO_PITCH_MIN 8     # 抬轮后的最小爬升俯仰角 [deg]
-param set RWTO_PMAX 8                    # near-runway takeoff pitch ceiling for rear-propeller clearance
-param set FW_LND_PMAX 8                  # low-height approach pitch ceiling
-param set FW_P_TKO_HGT 50                # crossing 50 m above takeoff point triggers release to cruise authority
-param set FW_P_LND_HGT 50                # first descent below 50 m AGL triggers landing authority
-param set FW_P_TRANS_DUR 5               # both phase changes use a 5 s smoothstep instead of continuous height mapping
-# V8 airborne pitch-rate loop. The PDF engine position and 3 deg down-thrust
-# produce a real nose-down throttle coupling, so the earlier weak V3-style
-# gains only balanced the engine moment and left no pull-out margin. These use
-# "param set" intentionally so stale parameters.bson values cannot restore it.
-param set TRIM_PITCH -0.02       # re-trimmed for the V8 +6 deg fixed canard; integrators remain active for unknown real trim
-param set FW_PR_D 0.10           # airborne pitch angular-acceleration damping at the validated 2 ms step
-param set FW_PR_FF 0.90          # improves signed pitch-rate tracking in climb and 30 deg banks; runway boost remains separate
+param set FW_P_TC 0.8 # 空中俯仰姿态外回路时间常数 [s]
+param set FW_P_RMAX_POS 10 # 巡航/转弯正俯仰角速率权限
+param set FW_P_RMAX_TKO 6 # 近跑道起飞角速率，保留自稳定基线
+param set FW_P_RMAX_LND 6 # 低高度降落角速率限制
+param set FW_P_RMAX_SLEW 2 # 阶段限制过渡 [deg/s^2]，避免任务/高度切换阶跃
+param set FW_P_RMAX_NEG 10 # 足够对称的低头限制，避免激发长周期模态
+param set FW_PR_D 0.10 # 经验证的 2 ms 步长下的空中俯仰角加速度阻尼
+param set FW_PR_FF 0.90 # 改善爬升和 30 deg 坡度时有符号俯仰角速率跟踪；跑道助力保持独立
 param set FW_PR_FF_RWTO 6.6      # 跑道解锁前馈；2 deg/s内退回空中前馈，兼顾早抬轮与低过冲
 param set FW_PR_FF_LND 6.6       # 降落拉平专用前馈；仅降落轮控窗口启用，不再借用起飞逻辑
 param set FW_PR_RWTO_Q 2.0       # 机头开始转动后在 2 deg/s 内释放跑道助力，兼顾抬轮与过冲
-param set FW_PR_I 0.04           # retained pitch-rate integrator for CG/servo/aero trim changes
-param set FW_PR_IMAX 0.12        # bounded trim authority preserves turn pull-up margin without dominating reversals
-param set FW_PR_P 0.40           # closes banked-flight rate error without removing the real-trim integrator
-param set FW_P_TC 0.8            # airborne pitch attitude outer-loop time constant [s]
-param set FW_P_RMAX_POS 10       # cruise/turn positive pitch-rate authority
-param set FW_P_RMAX_TKO 6        # near-runway takeoff rate retained from the stable baseline
-param set FW_P_RMAX_LND 6        # low-height landing rate limit
-param set FW_P_RMAX_SLEW 2       # phase-limit transition [deg/s^2], avoids task/height switching steps
-param set FW_P_RMAX_NEG 10       # symmetric-enough nose-down limit avoids exciting the long-period mode
-
-param set FW_RR_D 0.06           # reversal damping for the no-foldback 30 deg course-change acceptance route
-param set FW_RR_FF 1.45          # supplies the measured authority needed to follow a 20 deg/s rate command
-param set FW_RR_I 0.05           # retain real-aircraft trim rejection while limiting reversal integral memory
-param set FW_RR_IMAX 0.20        # roll rate integral limit
-param set FW_RR_P 0.26           # reduces sustained roll-command phase lag without aileron saturation
-param set FW_R_TC 0.65           # validated airborne roll attitude outer-loop time constant [s]
-param set FW_R_LIM 30            # validated test ceiling; 40 m/s coordinated level-turn radius about 283 m
-param set FW_R_RMAX 20           # validated maximum airborne roll-rate setpoint [deg/s]
-param set FW_PN_R_SLEW_MAX 20    # match NPFG roll-command slew to the validated inner-loop bandwidth
-param set NPFG_PERIOD 20.0       # latest clean QGC logs: smoother early turns, less roll saturation and smaller height/airspeed excursions
-param set NPFG_DAMPING 0.80      # reduce S-turn overshoot while retaining useful cross-track convergence
-param set NPFG_ROLL_TC 1.30      # measured candidate-2 roll response model used by NPFG stability period bounds
-param set NPFG_SW_DST_MLT 0.32   # validated line-following baseline; larger values chase the next leg extension rather than a circular fillet
-
+param set FW_PR_I 0.04 # 保留俯仰角速率积分器以适应 CG/舵机/气动配平变化
+param set FW_PR_IMAX 0.12 # 有界配平权限保留转弯拉杆裕度，同时不主导反向操作
+param set FW_PR_P 0.40 # 消除坡度飞行角速率误差，同时保留实机配平积分器
+param set RWTO_PMAX 4 # 近跑道起飞俯仰上限，为后置螺旋桨留出间隙
+param set FW_LND_PMAX 8 # 低高度进近俯仰上限
+param set FW_P_TKO_HGT 50 # 超过起飞点上方 50 m 后触发释放到巡航权限
+param set FW_P_LND_HGT 50 # 首次下降到 50 m AGL 以下触发降落权限
+param set FW_P_TRANS_DUR 5 # 两个阶段切换使用 5 s 平滑过渡，而非连续高度映射
+# ---------------------------------------------------------------------------
+# 滚转控制
+# ---------------------------------------------------------------------------
+param set FW_RR_D 0.06 # 无反折 30 deg 航向变更验收路线的反向阻尼
+param set FW_RR_FF 1.45 # 提供跟踪 20 deg/s 角速率指令所需的实测权限
+param set FW_RR_I 0.05 # 保留实机配平抗扰，同时限制反向积分记忆
+param set FW_RR_IMAX 0.20 # 滚转角速率积分限制
+param set FW_RR_P 0.26 # 减少持续滚转指令相位滞后，同时不导致副翼饱和
+param set FW_R_TC 0.65 # 经验证的空中滚转姿态外回路时间常数 [s]
+param set FW_R_LIM 30 # 经验证的测试上限；40 m/s 协调水平转弯半径约 283 m
+param set FW_R_RMAX 20 # 经验证的最大空中滚转角速率设定 [deg/s]
+# ---------------------------------------------------------------------------
+# 导航与制导
+# ---------------------------------------------------------------------------
+param set FW_PN_R_SLEW_MAX 20 # 将 NPFG 滚转指令变化率匹配到经验证的内回路带宽
+param set NPFG_PERIOD 20.0 # 最新干净的 QGC 日志：更平滑的早期转弯，更少的滚转饱和，更小的高度/空速偏移
+param set NPFG_DAMPING 0.80 # 减少 S 弯超调，同时保留有用的偏航距收敛
+param set NPFG_ROLL_TC 1.30 # NPFG 稳定周期边界使用的候选方案 2 滚转响应模型
+param set NPFG_SW_DST_MLT 0.32 # 经验证的线路跟随基线；较大值会追逐下一航段延伸而非圆弧过渡
+# ---------------------------------------------------------------------------
+# 任务与降落
+# ---------------------------------------------------------------------------
 param set-default MIS_TAKEOFF_ALT 45     # 默认任务起飞高度 [m]
-param set NAV_ACC_RAD 250                # mission acceptance lower bound; this alone does not create a fixed-wing circular fly-by [m]
+param set NAV_ACC_RAD 250 # 任务验收下限；仅此参数不会产生固定翼圆形绕飞 [m]
 param set-default NAV_LOITER_RAD 800     # 任务导航使用的盘旋/转弯半径 [m]
 param set-default FW_LND_ANG 4           # 最终进近下滑角 [deg]
 param set-default FW_LND_USETER 0        # 禁用地形估计触发拉平
@@ -147,7 +153,9 @@ param set-default FW_LND_FL_PMIN 1       # 拉平阶段最小俯仰角 [deg]
 param set-default FW_LND_FL_PMAX 8       # 拉平阶段最大俯仰角 [deg]
 param set-default FW_LND_TD_TIME 3.0     # 拉平开始后的预计接地时间 [s]
 param set-default FW_LND_THRTC_SC 0.6    # 低高度 TECS 高度时间常数缩放系数
-param set-default FW_T_THR_LOW_HGT 30    # 低于该高度时启用更紧的 TECS 高度跟踪 [m]
+# ---------------------------------------------------------------------------
+# 跑道起飞
+# ---------------------------------------------------------------------------
 param set-default RWTO_TKOFF 1           # 启用跑道起飞逻辑
 param set RWTO_MAX_THR 1.0              # 35 m/s 后继续加速所需，避免 75% 推力与阻力平衡
 param set-default RWTO_RAMP_TIME 5.0     # 从怠速爬升到 RWTO_MAX_THR 的时间 [s]
@@ -169,12 +177,16 @@ param set RWTO_TAXI_XMAX 20.0    # 地面滑跑最大航向修正角 [deg]，避
 param set RWTO_TAXI_YRMAX 15.0   # 地面滑跑航向设定变化率上限 [deg/s]
 param set RWTO_TAXI_TIME 180.0   # 地面滑行测试最大时长 [s]，0=不按时间自动收油
 param set-default RWTO_PSP 0.0           # 滑跑/抬轮前俯仰设定 [deg]
-param set-default RWTO_ROT_AIRSPD 35.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
-
+param set-default FW_TKO_P_RATE 3    # 起飞阶段俯仰角变化率限制 [deg/s]，0=禁用
+param set-default RWTO_ROT_AIRSPD 38.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
 param set RWTO_WHEEL_HGT 0.20            # 旋转后保留前轮闭环至刚离地；0 对旧机型保持原行为
 param set RWTO_HDG 1            # 起飞滑跑前轮跟随航线方位(1=跟随航线, 0=锁定初始航向)
-param set RWTO_DIR_MIN 50       # coincident TAKEOFF point defines altitude only; use the next mission waypoint for runway direction [m]
+param set RWTO_DIR_MIN 50 # 重合的 TAKEOFF 点仅定义高度；使用下一个任务航点定义跑道方向 [m]
 param set-default RWTO_NPFG_PERIOD 8.0   # 跑道转向阶段使用较慢的横向制导周期 [s]
+param set-default FW_TKO_PITCH_MIN 6     # 抬轮后的最小爬升俯仰角 [deg]
+# ---------------------------------------------------------------------------
+# 前轮转向控制器
+# ---------------------------------------------------------------------------
 param set FW_W_EN 1              # 启用跑道滑跑/降落用前轮转向控制器
 param set FW_W_TC 2.50           # 前轮执行力修复后放慢航向外环，避免低速过控
 param set FW_WR_P 0.25           # 约1deg级轮角权威；5deg扰动试验保持可控并出现回线趋势
@@ -183,59 +195,49 @@ param set FW_WR_IMAX 0.30        # 前轮积分输出上限，防止地面持续
 param set FW_WR_FF 0.08          # 降低前馈，避免反打前积累过大的偏航惯性
 param set FW_W_RMAX 20.0         # 限制地面目标偏航角速度 [deg/s]
 param set FW_W_GSPD_SC 5.0       # 5m/s以上按地速降低前轮权威，保护高速起飞滑跑
+# ---------------------------------------------------------------------------
+# EKF 配置
+# ---------------------------------------------------------------------------
 param set EKF2_GPS_CHECK 0       # 仿真地面滑跑关闭 EKF GPS 质量门限，避免航向/位置初始化失败
 param set EKF2_REQ_HDRIFT 5.0    # 仿真地面滑行时放宽 GPS 静止水平漂移/速度检查，避免短暂位置 failsafe
-
 # ---------------------------------------------------------------------------
-# Topology definition: 8 control surfaces matching Gazebo model
+# 控制分配拓扑
 # ---------------------------------------------------------------------------
 param set-default CA_AIRFRAME 1
 param set-default CA_ROTOR_COUNT 1
 param set-default CA_ROTOR0_PX -1.23
 param set-default CA_SV_CS_COUNT 8
-
 # ---------------------------------------------------------------------------
-# Control allocation mapping (matches Gazebo servo_0..servo_7 order).
-# Paired conventional surfaces use Custom so the explicit 0.5 effectiveness
-# is preserved; canards use V3 state-machine types 19/20 and never enter pitch allocation.
+# 控制分配舵面映射
 # ---------------------------------------------------------------------------
-# 0: Left Aileron -- roll control
+# 0: 左副翼 -- 滚转控制
+# 1: 右副翼 -- 滚转控制
+# 2: 左升降舵 -- 俯仰控制
+# 3: 右升降舵 -- 俯仰控制
+# 4: 左方向舵 -- 偏航控制
+# 5: 右方向舵 -- 偏航控制
+# 6: 左鸭翼 -- 通过鸭翼状态机辅助俯仰
+# 7: 右鸭翼 -- 通过鸭翼状态机辅助俯仰
 param set-default CA_SV_CS0_TYPE  12
 param set-default CA_SV_CS0_TRQ_R -0.5
-
-# 1: Right Aileron -- roll control
 param set-default CA_SV_CS1_TYPE  12
 param set-default CA_SV_CS1_TRQ_R 0.5
-
-# 2: Left Elevator -- pitch control
 param set-default CA_SV_CS2_TYPE  12
 param set-default CA_SV_CS2_TRQ_P 0.5
-
-# 3: Right Elevator -- pitch control
 param set-default CA_SV_CS3_TYPE  12
 param set-default CA_SV_CS3_TRQ_P 0.5
-
-# 4: Left Rudder -- yaw control
 param set-default CA_SV_CS4_TYPE  12
 param set-default CA_SV_CS4_TRQ_Y 0.5
-
-# 5: Right Rudder -- yaw control
 param set-default CA_SV_CS5_TYPE  12
 param set-default CA_SV_CS5_TRQ_Y 0.5
-
-# 6: Left Canard -- auxiliary pitch via canard state machine
 param set-default CA_SV_CS6_TYPE  19
 param set-default CA_SV_CS6_CANARD 1.0
-
-# 7: Right Canard -- auxiliary pitch via canard state machine
 param set-default CA_SV_CS7_TYPE  20
 param set-default CA_SV_CS7_CANARD 1.0
-
 # ---------------------------------------------------------------------------
-# Gazebo simulation output bridge
+# Gazebo 仿真桥接 - 舵机行程
 # ---------------------------------------------------------------------------
-# V8 uses a true zero-angle point for every channel. This is essential for
-# the asymmetric -50/0/+15 deg canard travel.
+# V8 所有通道使用真实零度角点，这对非对称的 -50/0/+15 deg 鸭翼行程至关重要
 param set SIM_GZ_SV_ZMAP 1
 param set SIM_GZ_SV_MINA1 -30
 param set SIM_GZ_SV_ZEROA1 0
@@ -264,38 +266,38 @@ param set SIM_GZ_SV_MAXA8 15
 param set SIM_GZ_SV_MINA9 30
 param set SIM_GZ_SV_ZEROA9 0
 param set SIM_GZ_SV_MAXA9 -30
-
-param set-default SIM_GZ_EC_FUNC1 101 # Motor 1 throttle
-
-param set-default SIM_GZ_SV_FUNC1 201 # Servo 1 -> CS0 (left aileron)
-param set-default SIM_GZ_SV_FUNC2 202 # Servo 2 -> CS1 (right aileron)
-param set-default SIM_GZ_SV_FUNC3 203 # Servo 3 -> CS2 (left elevator)
-param set-default SIM_GZ_SV_FUNC4 204 # Servo 4 -> CS3 (right elevator)
-param set-default SIM_GZ_SV_FUNC5 205 # Servo 5 -> CS4 (left rudder)
-param set-default SIM_GZ_SV_FUNC6 206 # Servo 6 -> CS5 (right rudder)
-param set-default SIM_GZ_SV_FUNC7 207 # Servo 7 -> CS6 (left canard)
-param set-default SIM_GZ_SV_FUNC8 208 # Servo 8 -> CS7 (right canard)
-param set-default SIM_GZ_SV_FUNC9 440 # Servo 9 -> Landing_Gear_Wheel (nose steering)
-
-# 前轮转向符号：PX4 正偏航/右转映射到 Gazebo 负关节角；正 Gazebo 关节角产生左转。
+# ---------------------------------------------------------------------------
+# Gazebo 仿真桥接 - 功能映射
+# ---------------------------------------------------------------------------
+# 前轮转向符号：PX4 正偏航/右转映射到 Gazebo 负关节角；正 Gazebo 关节角产生左转
+param set-default SIM_GZ_SV_FUNC1 201 # 舵机 1 -> CS0 (左副翼)
+param set-default SIM_GZ_SV_FUNC2 202 # 舵机 2 -> CS1 (右副翼)
+param set-default SIM_GZ_SV_FUNC3 203 # 舵机 3 -> CS2 (左升降舵)
+param set-default SIM_GZ_SV_FUNC4 204 # 舵机 4 -> CS3 (右升降舵)
+param set-default SIM_GZ_SV_FUNC5 205 # 舵机 5 -> CS4 (左方向舵)
+param set-default SIM_GZ_SV_FUNC6 206 # 舵机 6 -> CS5 (右方向舵)
+param set-default SIM_GZ_SV_FUNC7 207 # 舵机 7 -> CS6 (左鸭翼)
+param set-default SIM_GZ_SV_FUNC8 208 # 舵机 8 -> CS7 (右鸭翼)
+param set-default SIM_GZ_SV_FUNC9 440 # 舵机 9 -> Landing_Gear_Wheel (前轮转向)
 param set-default SIM_GZ_SV_DIS9 500
 param set-default SIM_GZ_SV_MIN9 0
 param set-default SIM_GZ_SV_MAX9 1000
 param set-default SIM_GZ_SV_FAIL9 500
-
-param set SIM_GZ_EC_MIN1 0
-param set SIM_GZ_EC_MAX1 1000
+# ---------------------------------------------------------------------------
+# 鸭翼状态机
+# ---------------------------------------------------------------------------
+# FW_CANARD_NEUT: 中立鸭翼设定
+# FW_CANARD_TO: 起飞巡航鸭翼设定（0=中立，1=最大后缘向下）
+# FW_CANARD_BRK: 气动减速鸭翼设定（0=中立，1=最大后缘向上）
+# FW_CANARD_LND_H: 接地 AGL 高度阈值 [m]
+# FW_CANARD_LND_NZ: 接地法向过载阈值 [g]
+param set FW_CANARD_NEUT   0.5
+param set FW_CANARD_TO     0.4 # V8 要求 +6 deg 起飞/巡航设定；由 V3 派生状态逻辑在飞行中保持
+param set FW_CANARD_BRK    1.0
+param set-default FW_CANARD_LND_H  0.1
+param set-default FW_CANARD_LND_NZ 1.5
+# ---------------------------------------------------------------------------
+# 其他参数
+# ---------------------------------------------------------------------------
 param set-default FD_ESCS_EN 0
 
-# ---------------------------------------------------------------------------
-# Canard state machine parameters
-# ---------------------------------------------------------------------------
-# FW_CANARD_TO:  Takeoff cruise canard setting (0=neutral, 1=max trailing-edge-down)
-param set FW_CANARD_NEUT   0.5
-param set FW_CANARD_TO     0.4      # +6 deg takeoff/cruise setting requested for V8; retained in flight by the V3-derived state logic
-# FW_CANARD_BRK: Aerodynamic braking canard setting (0=neutral, 1=max trailing-edge-up)
-param set FW_CANARD_BRK    1.0
-# FW_CANARD_LND_H:  Touchdown AGL height threshold [m]
-param set-default FW_CANARD_LND_H  0.1
-# FW_CANARD_LND_NZ: Touchdown normal load factor threshold [g]
-param set-default FW_CANARD_LND_NZ 1.5

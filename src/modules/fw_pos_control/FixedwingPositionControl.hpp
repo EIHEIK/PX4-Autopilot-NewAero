@@ -1116,6 +1116,7 @@ private:
 		(ParamFloat<px4::params::FW_CANARD_TO>) _param_fw_canard_to,
 		(ParamFloat<px4::params::FW_CANARD_BRK>) _param_fw_canard_brk,
 		(ParamFloat<px4::params::FW_CANARD_BRKD>) _param_fw_canard_brkd,
+		(ParamFloat<px4::params::FW_CANARD_RETR>) _param_fw_canard_retr,
 		(ParamFloat<px4::params::FW_CANARD_LND_H>) _param_fw_canard_lnd_h,
 		(ParamFloat<px4::params::FW_CANARD_LND_NZ>) _param_fw_canard_lnd_nz,
 		(ParamFloat<px4::params::FW_CANARD_LND_H2>) _param_fw_canard_lnd_h2,

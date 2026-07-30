@@ -1070,12 +1070,27 @@ PARAM_DEFINE_FLOAT(FW_CANARD_BRK, 1.0f);
  *
  * @unit s
  * @min 0.0
- * @max 5.0
+ * @max 10.0
  * @decimal 2
  * @increment 0.05
  * @group FW Attitude Control
  */
-PARAM_DEFINE_FLOAT(FW_CANARD_BRKD, 1.0f);
+PARAM_DEFINE_FLOAT(FW_CANARD_BRKD, 5.0f);
+
+/**
+ * Canard retraction angle after touchdown
+ *
+ * 主轮接地后鸭翼立即收回的目标角度 [0,1]。
+ * 0=后缘极限上偏, 0.5=中立(0°), 1=后缘极限下偏。
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.01
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_RETR, 0.5f);
 
 /**
  * Canard landing retraction height threshold

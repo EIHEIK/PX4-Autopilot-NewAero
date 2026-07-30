@@ -81,7 +81,7 @@ void ActuatorEffectivenessControlSurfaces::updateParams()
 	int32_t count = 0;
 
 	if (param_get(_count_handle, &count) == 0) {
-		_count = math::constrain(count, 0, MAX_COUNT);
+		_count = math::constrain((int)count, 0, MAX_COUNT);
 	}
 
 	for (int i = 0; i < _count; i++) {

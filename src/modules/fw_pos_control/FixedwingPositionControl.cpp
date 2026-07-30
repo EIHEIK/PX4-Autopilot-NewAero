@@ -2595,7 +2595,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 
 		if (_vehicle_acceleration_sub.copy(&accel)
 		    && PX4_ISFINITE(accel.xyz[2])) {
-			float normal_load = accel.xyz[2] / CONSTANTS_ONE_G;
+			float normal_load = -accel.xyz[2] / CONSTANTS_ONE_G;
 
 			bool agl_valid = false;
 			float agl_height = 0.f;
@@ -2625,13 +2625,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		}
 	}
 
-	// 阶段1/2：升降舵强制最大低头偏角（气动刹车）
-	if (_canard_touchdown_phase == 1 || _canard_touchdown_phase == 2) {
-		const Eulerf euler_current(Quatf(_att_sp.q_d));
-		const Quatf att_override(Eulerf(euler_current.phi(), radians(_param_fw_p_lim_min.get()), _yaw));
-		att_override.copyTo(_att_sp.q_d);
-	}
-	// 阶段3：地速为零后鸭翼归零锁存
+	// 阶段2→3：地速为零后鸭翼归零锁存
 	if (_canard_touchdown_phase == 2) {
         // 使用 PX4_ISFINITE 安全过滤，防止GPS丢星导致NaN卡死状态机
         if (PX4_ISFINITE(ground_speed.norm()) && ground_speed.norm() < _param_fw_canard_rspd.get()) {
@@ -2906,12 +2900,6 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		}
 	}
 
-	// 阶段1/2：升降舵强制最大低头偏角（气动刹车）
-	if (_canard_touchdown_phase == 1 || _canard_touchdown_phase == 2) {
-		const Eulerf euler_current(Quatf(_att_sp.q_d));
-		const Quatf att_override(Eulerf(euler_current.phi(), radians(_param_fw_p_lim_min.get()), _yaw));
-		att_override.copyTo(_att_sp.q_d);
-	}
 
 	// 阶段2→3：地速为零后鸭翼归零锁存
 	if (_canard_touchdown_phase == 2) {
@@ -3412,6 +3400,9 @@ FixedwingPositionControl::Run()
 
 		} else if (_canard_braked) {//鸭翼空气刹车态 → 后缘极限上偏
 			_canard_setpoint = _param_fw_canard_neut.get() - _param_fw_canard_brk.get() * 0.5f;
+
+		} else if (_canard_deployed && _canard_touchdown_phase == 1) {//鸭翼接地收回态 → 可配置收回角
+			_canard_setpoint = _param_fw_canard_retr.get();
 
 		} else if (_canard_deployed) {//鸭翼巡航/起飞展开态 → 后缘下偏
 			_canard_setpoint = _param_fw_canard_neut.get() + _param_fw_canard_to.get() * 0.5f;
