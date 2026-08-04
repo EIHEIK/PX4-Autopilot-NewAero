@@ -84,9 +84,43 @@ in Gazebo those principal moments are `+Mx/-My/-Mz/-My`.
 
 ## Physical model
 
-The assembled targets are `m=150 kg`, `S=2.42 m2`, `b=3.96 m`, `c=0.62 m`.
-The generator subtracts every child link through the parallel-axis theorem so
-the assembled CG and FLU inertia remain exactly at the PDF targets.
+The mass model is compositional rather than a monolithic `base_link` inertia:
+
+- the physical baseline is the Word table-3 `73 kg` aircraft with full internal
+  fuel, including its supplied complete inertia tensor;
+- its current longitudinal CG is the explicit engineering assumption
+  `x=-1.58 m`, 10 mm aft of the common target/reference at `x=-1.57 m`;
+- the Word `CGz=-0.03 m` is retained;
+- movable surfaces and wheels remain explicit child links, so their properties
+  are subtracted from the residual `base_link` and are never counted twice;
+- an internal fixed link named `adjustable_ballast` closes the requested total
+  mass and CG through the parallel-axis theorem.
+
+The production 150 kg model uses a `77 kg` ballast centred at Gazebo FLU
+`(0.009480519, 0, -0.028441558) m`. Its intrinsic tensor is solved so the full
+assembly exactly reproduces the Word 150 kg inertia
+`Ixx/Iyy/Izz=25.86/39.14/59.12 kg m2` and the supplied products of inertia.
+The isolated 100 kg derivative uses `27 kg` at
+`(0.027037037, 0, -0.081111111) m`. It retains the same ballast geometry
+(constant intrinsic inertia per unit mass), giving the physically composed
+100 kg FLU tensor:
+
+```text
+[25.714298926   0.019597403   2.983554188]
+[ 0.019597403  33.951414391  -0.000796104]
+[ 2.983554188  -0.000796104  53.856336244] kg m2
+```
+
+Directly interpolating the complete 73/150 kg tensors was rejected for this
+architecture: together with the supplied 73 kg vertical CG it would require a
+27 kg ballast with a negative principal inertia. The generator constants
+`BASE_73_CG_PDF_FRD` and `TARGET_ASSEMBLED_CG_PDF_FRD` are the intended
+physical-CG inputs; changing them recomputes both ballast positions rather than
+editing SDF inertial blocks by hand. `REFERENCE_CG_PDF_FRD` remains the fixed
+geometry and aerodynamic moment reference unless a deliberate coordinate-system
+migration is performed.
+
+The aerodynamic geometry remains `S=2.42 m2`, `b=3.96 m`, `c=0.62 m`.
 
 The phase-1 gear has no prismatic joints:
 

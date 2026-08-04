@@ -496,6 +496,7 @@ private:
 	bool _canard_retracted{false};
 	bool _canard_braked{false};
 	hrt_abstime _canard_touchdown_time{0};
+	hrt_abstime _canard_touchdown_load_time{0};
 	uint8_t _canard_touchdown_phase{0};
 	float _canard_trim_offset{0.f};		// 鸭翼自动配平补偿量 [0,1]，缓慢响应TECS俯仰积分器
 
@@ -1120,6 +1121,7 @@ private:
 		(ParamFloat<px4::params::FW_CANARD_LND_H>) _param_fw_canard_lnd_h,
 		(ParamFloat<px4::params::FW_CANARD_LND_NZ>) _param_fw_canard_lnd_nz,
 		(ParamFloat<px4::params::FW_CANARD_LND_H2>) _param_fw_canard_lnd_h2,
+		(ParamFloat<px4::params::FW_CANARD_LND_PK>) _param_fw_canard_lnd_pk,
 		(ParamFloat<px4::params::FW_CANARD_RSPD>) _param_fw_canard_rspd,
 		(ParamInt<px4::params::FW_CANARD_MAN>) _param_fw_canard_man,
 		(ParamInt<px4::params::FW_CANARD_RC_AUX>) _param_fw_canard_rc_aux,

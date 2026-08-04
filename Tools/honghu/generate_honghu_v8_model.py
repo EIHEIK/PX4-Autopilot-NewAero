@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the Honghu Wing V8 SDF and solve base-link mass properties.
+"""Generate the Honghu Wing V8 SDF and its compositional mass model.
 
-The PDF target is the assembled model target. Child-link mass properties are
-subtracted with the parallel-axis theorem so the full neutral model is 150 kg,
-has its CG at base_link, and has the requested Gazebo/FLU inertia tensor.
+The physical baseline is the Word table-3 73 kg aircraft with full internal
+fuel.  A separate fixed ballast link raises it to the requested test mass.  The
+ballast location is solved from the CG constraint and its inertia is derived
+from the supplied 150 kg state.  Child-link mass properties are subtracted
+from the 73 kg assembly through the parallel-axis theorem, so movable surfaces
+and wheels remain explicit without being counted twice.
 """
 
 from dataclasses import dataclass
@@ -13,12 +16,37 @@ from typing import Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = ROOT / "simulation_models/models/honghu_wing_150kg_v8"
-TARGET_MASS = 150.0
-TARGET_INERTIA = [
+REFERENCE_CG_PDF_FRD = (-1.57, 0.0, 0.0)
+TARGET_ASSEMBLED_CG_PDF_FRD = (-1.57, 0.0, 0.0)
+
+# Table 3 supplies the 73 kg full-internal-fuel state.  Its printed x=-1.56 m
+# conflicts with table 2 and has been declared a typo.  The project requirement
+# is that this unballasted state is slightly aft of x=-1.57 m; until measured
+# data are available, use the smallest explicit aft offset (10 mm).  Keeping it
+# here makes later CG updates a one-line, auditable change.
+BASE_73_MASS = 73.0
+BASE_73_CG_PDF_FRD = (-1.58, 0.0, -0.03)
+BASE_73_INERTIA_GZ = [
+    [25.33, 0.021, 2.592],
+    [0.021, 30.81, -0.0002],
+    [2.592, -0.0002, 50.98],
+]
+
+TARGET_150_MASS = 150.0
+TARGET_150_INERTIA_GZ = [
     [25.86, 0.017, 3.520],
     [0.017, 39.14, -0.0019],
     [3.520, -0.0019, 59.12],
 ]
+
+
+def pdf_frd_point_to_gz(point, origin=REFERENCE_CG_PDF_FRD):
+    """Convert a PDF nose-origin FRD point into the Gazebo reference frame."""
+    return (point[0] - origin[0], -(point[1] - origin[1]), -(point[2] - origin[2]))
+
+
+BASE_73_CG_GZ = pdf_frd_point_to_gz(BASE_73_CG_PDF_FRD)
+TARGET_ASSEMBLED_CG_GZ = pdf_frd_point_to_gz(TARGET_ASSEMBLED_CG_PDF_FRD)
 
 
 @dataclass(frozen=True)
@@ -59,6 +87,10 @@ def mat_sub(a, b):
     return [[a[i][j] - b[i][j] for j in range(3)] for i in range(3)]
 
 
+def mat_scale(a, scale):
+    return [[scale * a[i][j] for j in range(3)] for i in range(3)]
+
+
 def parallel_axis(mass, r):
     x, y, z = r
     return [
@@ -68,12 +100,25 @@ def parallel_axis(mass, r):
     ]
 
 
+def explicit_parts():
+    """Movable links whose mass is already included in the 73 kg aircraft."""
+    return [Part(row[2], row[3], row[4]) for row in CONTROLS] + GEAR_PARTS
+
+
 def solve_base_properties():
-    parts = [Part(row[2], row[3], row[4]) for row in CONTROLS] + GEAR_PARTS
+    """Solve the residual base_link inside the complete 73 kg aircraft.
+
+    The returned base_link is not the whole aircraft: controls and wheels stay
+    explicit.  Their assembly closes to the Word 73 kg mass, CG and inertia.
+    """
+    parts = explicit_parts()
     child_mass = sum(p.mass for p in parts)
-    base_mass = TARGET_MASS - child_mass
+    base_mass = BASE_73_MASS - child_mass
     child_moment = [sum(p.mass * p.position[i] for p in parts) for i in range(3)]
-    base_com = tuple(-value / base_mass for value in child_moment)
+    base_com = tuple(
+        (BASE_73_MASS * BASE_73_CG_GZ[i] - child_moment[i]) / base_mass
+        for i in range(3)
+    )
     child_inertia = [[0.0] * 3 for _ in range(3)]
     for part in parts:
         intrinsic = [
@@ -81,9 +126,88 @@ def solve_base_properties():
             [0.0, part.inertia[1], 0.0],
             [0.0, 0.0, part.inertia[2]],
         ]
-        child_inertia = mat_add(child_inertia, mat_add(intrinsic, parallel_axis(part.mass, part.position)))
-    base_inertia = mat_sub(mat_sub(TARGET_INERTIA, child_inertia), parallel_axis(base_mass, base_com))
+        relative = tuple(part.position[i] - BASE_73_CG_GZ[i] for i in range(3))
+        child_inertia = mat_add(
+            child_inertia,
+            mat_add(intrinsic, parallel_axis(part.mass, relative)),
+        )
+    base_relative = tuple(base_com[i] - BASE_73_CG_GZ[i] for i in range(3))
+    base_inertia = mat_sub(
+        mat_sub(BASE_73_INERTIA_GZ, child_inertia),
+        parallel_axis(base_mass, base_relative),
+    )
     return base_mass, base_com, base_inertia
+
+
+def ballast_position(target_mass, target_cg=TARGET_ASSEMBLED_CG_GZ):
+    """Return ballast CG in the reference-centred Gazebo frame."""
+    ballast_mass = target_mass - BASE_73_MASS
+    if ballast_mass <= 0.0:
+        raise ValueError("target mass must exceed the 73 kg baseline")
+    return tuple(
+        (target_mass * target_cg[i] - BASE_73_MASS * BASE_73_CG_GZ[i]) / ballast_mass
+        for i in range(3)
+    )
+
+
+def full_ballast_inertia():
+    """Solve the physical 77 kg ballast tensor from the supplied 150 kg state."""
+    ballast_mass = TARGET_150_MASS - BASE_73_MASS
+    supplied_target_cg = pdf_frd_point_to_gz(REFERENCE_CG_PDF_FRD)
+    position = ballast_position(TARGET_150_MASS, supplied_target_cg)
+    inertia = mat_sub(
+        mat_sub(
+            TARGET_150_INERTIA_GZ,
+            mat_add(
+                BASE_73_INERTIA_GZ,
+                parallel_axis(
+                    BASE_73_MASS,
+                    tuple(BASE_73_CG_GZ[i] - supplied_target_cg[i] for i in range(3)),
+                ),
+            ),
+        ),
+        parallel_axis(
+            ballast_mass,
+            tuple(position[i] - supplied_target_cg[i] for i in range(3)),
+        ),
+    )
+    return inertia
+
+
+def ballast_properties(target_mass):
+    """Return mass, position and intrinsic inertia for an adjustable ballast.
+
+    The 150 kg case exactly reproduces Word table 2/3.  Other masses use the
+    same ballast package geometry (constant inertia per unit mass), which is a
+    physically realisable compositional model and replaces the old direct
+    interpolation of whole-aircraft inertia.
+    """
+    mass = target_mass - BASE_73_MASS
+    position = ballast_position(target_mass)
+    inertia = mat_scale(full_ballast_inertia(), mass / (TARGET_150_MASS - BASE_73_MASS))
+    return mass, position, inertia
+
+
+def target_mass_properties(target_mass):
+    """Return assembled mass, configured CG and inertia about that CG."""
+    ballast_mass, ballast_com, ballast_inertia = ballast_properties(target_mass)
+    total_inertia = mat_add(
+        mat_add(
+            BASE_73_INERTIA_GZ,
+            parallel_axis(
+                BASE_73_MASS,
+                tuple(BASE_73_CG_GZ[i] - TARGET_ASSEMBLED_CG_GZ[i] for i in range(3)),
+            ),
+        ),
+        mat_add(
+            ballast_inertia,
+            parallel_axis(
+                ballast_mass,
+                tuple(ballast_com[i] - TARGET_ASSEMBLED_CG_GZ[i] for i in range(3)),
+            ),
+        ),
+    )
+    return target_mass, TARGET_ASSEMBLED_CG_GZ, total_inertia
 
 
 def fmt_pose(values):
@@ -107,6 +231,31 @@ def inertia_xml(mass, position, diag):
           <iyy>{diag[1]:.12g}</iyy><iyz>0</iyz><izz>{diag[2]:.12g}</izz>
         </inertia>
       </inertial>"""
+
+
+def ballast_xml(target_mass):
+    mass, position, inertia = ballast_properties(target_mass)
+    return f"""
+    <!-- Adjustable ballast: its mass and location close the 73 kg aircraft to
+         the requested total CG.  It has no collision because it is internal. -->
+    <link name="adjustable_ballast">
+      <pose relative_to="base_link">{fmt_pose((*position, 0, 0, 0))}</pose>
+      <gravity>true</gravity>
+      <inertial>
+        <mass>{mass:.12g}</mass>
+        <inertia>
+          <ixx>{inertia[0][0]:.12g}</ixx><ixy>{inertia[0][1]:.12g}</ixy><ixz>{inertia[0][2]:.12g}</ixz>
+          <iyy>{inertia[1][1]:.12g}</iyy><iyz>{inertia[1][2]:.12g}</iyz><izz>{inertia[2][2]:.12g}</izz>
+        </inertia>
+      </inertial>
+      <visual name="ballast_visual">
+        <geometry><box><size>0.24 0.16 0.12</size></box></geometry>
+        <material><ambient>0.95 0.45 0.05 0.65</ambient><diffuse>0.95 0.45 0.05 0.65</diffuse></material>
+      </visual>
+    </link>
+    <joint name="adjustable_ballast_joint" type="fixed">
+      <parent>base_link</parent><child>adjustable_ballast</child>
+    </joint>"""
 
 
 def control_xml(index, row):
@@ -220,6 +369,7 @@ SENSORS = """
 
 
 def generate():
+    target_mass = TARGET_150_MASS
     base_mass, base_com, base_i = solve_base_properties()
     control_blocks = "\n".join(control_xml(i, row) for i, row in enumerate(CONTROLS))
     controllers = "\n".join(
@@ -236,7 +386,9 @@ def generate():
 
     sdf = f"""<?xml version="1.0" encoding="UTF-8"?>
 <sdf version="1.9">
-  <!-- V8 coordinate contract: model/base_link is Gazebo FLU at assembled CG.
+  <!-- V8 coordinate contract: model/base_link is Gazebo FLU at the fixed
+       aerodynamic moment reference x=-1.57 m. Current 100/150 kg target CGs
+       coincide with it; future CG changes move the ballast, not this frame.
        PDF/PX4 FRD vectors convert with diag(1,-1,-1).
        Meshes are CAD/nose-origin assets translated +1.57 m into the CG frame. -->
   <model name="honghu_wing_150kg_v8">
@@ -268,6 +420,7 @@ def generate():
       </visual>
 {SENSORS}
     </link>
+{ballast_xml(target_mass)}
 {control_blocks}
 {main_gear_xml("left", 0.524303, "1.861274 -0.524303 0.4551 0 0 0", "left_backwheel.dae")}
 {main_gear_xml("right", -0.524303, "1.861274 0.524303 0.4551 0 0 0", "right_backwheel.dae")}
@@ -318,7 +471,12 @@ def generate():
 if __name__ == "__main__":
     mass, com, inertia = generate()
     print(f"generated {MODEL_DIR / 'model.sdf'}")
-    print(f"base mass={mass:.9f} kg, base COM={com}")
-    print("base inertia:")
+    print(f"73kg residual base_link mass={mass:.9f} kg, COM={com}")
+    print("73kg residual base_link inertia:")
     for row in inertia:
+        print("  " + " ".join(f"{value:.9f}" for value in row))
+    ballast_mass, ballast_com, ballast_inertia = ballast_properties(TARGET_150_MASS)
+    print(f"ballast mass={ballast_mass:.9f} kg, COM={ballast_com}")
+    print("ballast inertia:")
+    for row in ballast_inertia:
         print("  " + " ".join(f"{value:.9f}" for value in row))

@@ -113,7 +113,7 @@ param set FW_PR_RWTO_Q 2.0       # 机头开始转动后在 2 deg/s 内释放跑
 param set FW_PR_I 0.04 # 保留俯仰角速率积分器以适应 CG/舵机/气动配平变化
 param set FW_PR_IMAX 0.12 # 有界配平权限保留转弯拉杆裕度，同时不主导反向操作
 param set FW_PR_P 0.40 # 消除坡度飞行角速率误差，同时保留实机配平积分器
-param set RWTO_PMAX 4 # 近跑道起飞俯仰上限，为后置螺旋桨留出间隙
+param set RWTO_PMAX 7 # 与6 deg起飞最小俯仰构成合法包线；保留约3 deg后置螺旋桨擦地余量
 param set FW_LND_PMAX 8 # 低高度进近俯仰上限
 param set FW_P_TKO_HGT 50 # 超过起飞点上方 50 m 后触发释放到巡航权限
 param set FW_P_LND_HGT 50 # 首次下降到 50 m AGL 以下触发降落权限
@@ -177,7 +177,6 @@ param set RWTO_TAXI_XMAX 20.0    # 地面滑跑最大航向修正角 [deg]，避
 param set RWTO_TAXI_YRMAX 15.0   # 地面滑跑航向设定变化率上限 [deg/s]
 param set RWTO_TAXI_TIME 180.0   # 地面滑行测试最大时长 [s]，0=不按时间自动收油
 param set-default RWTO_PSP 0.0           # 滑跑/抬轮前俯仰设定 [deg]
-param set-default FW_TKO_P_RATE 3    # 起飞阶段俯仰角变化率限制 [deg/s]，0=禁用
 param set-default RWTO_ROT_AIRSPD 38.0  # 鸭翼展开 + 抬轮触发空速 [m/s]，需按实际失速速度调整
 param set RWTO_WHEEL_HGT 0.20            # 旋转后保留前轮闭环至刚离地；0 对旧机型保持原行为
 param set RWTO_HDG 1            # 起飞滑跑前轮跟随航线方位(1=跟随航线, 0=锁定初始航向)
@@ -291,13 +290,16 @@ param set-default SIM_GZ_SV_FAIL9 500
 # FW_CANARD_BRK: 气动减速鸭翼设定（0=中立，1=最大后缘向上）
 # FW_CANARD_LND_H: 接地 AGL 高度阈值 [m]
 # FW_CANARD_LND_NZ: 接地法向过载阈值 [g]
+# FW_CANARD_LND_H2: 无测距传感器时，降落地面参考高度门 [m]
+# FW_CANARD_LND_PK: 接地过载峰值保持时间 [s]；V8开启，旧机型默认关闭
 param set FW_CANARD_NEUT   0.5
 param set FW_CANARD_TO     0.4 # V8 要求 +6 deg 起飞/巡航设定；由 V3 派生状态逻辑在飞行中保持
 param set FW_CANARD_BRK    1.0
 param set-default FW_CANARD_LND_H  0.1
-param set-default FW_CANARD_LND_NZ 1.5
+param set-default FW_CANARD_LND_NZ 1.3
+param set-default FW_CANARD_LND_H2 1.0
+param set-default FW_CANARD_LND_PK 0.2
 # ---------------------------------------------------------------------------
 # 其他参数
 # ---------------------------------------------------------------------------
 param set-default FD_ESCS_EN 0
-

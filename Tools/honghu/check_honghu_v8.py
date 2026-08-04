@@ -4,6 +4,7 @@
 import csv
 import importlib.util
 import math
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -14,6 +15,7 @@ from honghu_v8_aero_model import HonghuV8AeroModel
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / "simulation_models/models/honghu_wing_150kg_v8"
 SDF = MODEL / "model.sdf"
+TEST_100_SDF = ROOT / "simulation_models/models/honghu_wing_100kg_v8_xiangyi_test/model.sdf"
 WORLD = ROOT / "Tools/simulation/gz/worlds/honghu_v8.sdf"
 AIRFRAME = ROOT / "ROMFS/px4fmu_common/init.d-posix/airframes/4028_gz_honghu_wing_150kg_v8"
 GZ_INIT = ROOT / "ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim"
@@ -88,7 +90,13 @@ def interp(path, row_query, column_query):
     return a + tr * (b - a)
 
 
-def check_mass_and_inertia(root, gen):
+def matrix_close(actual, expected, label, tol=2e-9):
+    for i in range(3):
+        for j in range(3):
+            close(actual[i][j], expected[i][j], tol=tol, label=f"{label}[{i},{j}]")
+
+
+def check_mass_and_inertia(root, gen, target_mass=150.0):
     mass, base_com, inertia = gen.solve_base_properties()
     base = root.find("./model/link[@name='base_link']")
     close(float(base.findtext("inertial/mass")), mass, label="base mass")
@@ -99,15 +107,71 @@ def check_mass_and_inertia(root, gen):
              ("iyy", 1, 1), ("iyz", 1, 2), ("izz", 2, 2))
     for tag, i, j in names:
         close(float(base.findtext(f"inertial/inertia/{tag}")), inertia[i][j], tol=2e-9, label=tag)
+    ballast = root.find("./model/link[@name='adjustable_ballast']")
+    if ballast is None:
+        fail("adjustable ballast link is missing")
+    expected_ballast_mass, expected_ballast_com, expected_ballast_inertia = gen.ballast_properties(target_mass)
+    close(float(ballast.findtext("inertial/mass")), expected_ballast_mass, label="ballast mass")
+    ballast_pose = [float(value) for value in ballast.findtext("pose").split()]
+    for i, expected in enumerate(expected_ballast_com):
+        close(ballast_pose[i], expected, tol=2e-9, label=f"ballast COM[{i}]")
+    for tag, i, j in names:
+        close(
+            float(ballast.findtext(f"inertial/inertia/{tag}")),
+            expected_ballast_inertia[i][j],
+            tol=2e-9,
+            label=f"ballast {tag}",
+        )
+
     total_mass = sum(float(link.findtext("inertial/mass")) for link in root.findall("./model/link"))
-    close(total_mass, 150.0, label="assembled mass")
-    child_moment = [
-        sum(part.mass * part.position[i] for part in
-            [gen.Part(row[2], row[3], row[4]) for row in gen.CONTROLS] + gen.GEAR_PARTS)
-        for i in range(3)
-    ]
+    close(total_mass, target_mass, label="assembled mass")
+
+    parts = gen.explicit_parts()
+    child_moment = [sum(part.mass * part.position[i] for part in parts) for i in range(3)]
+    baseline_moment = [mass * base_com[i] + child_moment[i] for i in range(3)]
     for i in range(3):
-        close(mass * base_com[i] + child_moment[i], 0.0, tol=2e-9, label=f"assembled CG moment[{i}]")
+        close(
+            baseline_moment[i],
+            gen.BASE_73_MASS * gen.BASE_73_CG_GZ[i],
+            tol=2e-9,
+            label=f"73 kg CG moment[{i}]",
+        )
+        total_moment = baseline_moment[i] + expected_ballast_mass * expected_ballast_com[i]
+        close(
+            total_moment,
+            target_mass * gen.TARGET_ASSEMBLED_CG_GZ[i],
+            tol=2e-9,
+            label=f"assembled CG moment[{i}]",
+        )
+
+    baseline_inertia = gen.mat_add(inertia, gen.parallel_axis(mass, tuple(base_com[i] - gen.BASE_73_CG_GZ[i] for i in range(3))))
+    for part in parts:
+        intrinsic = [[part.inertia[0], 0.0, 0.0], [0.0, part.inertia[1], 0.0], [0.0, 0.0, part.inertia[2]]]
+        relative = tuple(part.position[i] - gen.BASE_73_CG_GZ[i] for i in range(3))
+        baseline_inertia = gen.mat_add(
+            baseline_inertia,
+            gen.mat_add(intrinsic, gen.parallel_axis(part.mass, relative)),
+        )
+    matrix_close(baseline_inertia, gen.BASE_73_INERTIA_GZ, "73 kg inertia")
+
+    assembled_inertia = gen.mat_add(
+        gen.mat_add(
+            baseline_inertia,
+            gen.parallel_axis(
+                gen.BASE_73_MASS,
+                tuple(gen.BASE_73_CG_GZ[i] - gen.TARGET_ASSEMBLED_CG_GZ[i] for i in range(3)),
+            ),
+        ),
+        gen.mat_add(
+            expected_ballast_inertia,
+            gen.parallel_axis(
+                expected_ballast_mass,
+                tuple(expected_ballast_com[i] - gen.TARGET_ASSEMBLED_CG_GZ[i] for i in range(3)),
+            ),
+        ),
+    )
+    _, _, expected_total_inertia = gen.target_mass_properties(target_mass)
+    matrix_close(assembled_inertia, expected_total_inertia, f"{target_mass:g} kg inertia")
 
 
 def check_sdf_contract(root, gen):
@@ -581,7 +645,7 @@ def check_airframe():
         "param set FW_CANARD_BRK    1.0",
         "param set RWTO_WHEEL_HGT 0.20",
         "param set FW_P_LIM_MAX 10",
-        "param set RWTO_PMAX 8",
+        "param set RWTO_PMAX 7",
         "param set FW_LND_PMAX 8",
         "param set FW_P_TKO_HGT 50",
         "param set FW_P_LND_HGT 50",
@@ -632,6 +696,35 @@ def check_airframe():
     for item in ("CA_SV_CS6_TRQ_P", "CA_SV_CS7_TRQ_P"):
         if item in text:
             fail(f"state-machine canard must not enter pitch allocation: {item}")
+    if "FW_TKO_P_RATE" in text:
+        fail("undefined FW_TKO_P_RATE must not be written by the V8 airframe")
+    def airframe_parameter(name):
+        match = re.search(
+            rf"^\s*param set(?:-default)?\s+{re.escape(name)}\s+([-+]?\d+(?:\.\d+)?)",
+            text,
+            flags=re.MULTILINE,
+        )
+        if match is None:
+            fail(f"missing numeric airframe parameter {name}")
+        return float(match.group(1))
+
+    if airframe_parameter("FW_TKO_PITCH_MIN") > airframe_parameter("RWTO_PMAX"):
+        fail("FW_TKO_PITCH_MIN must not exceed RWTO_PMAX during CLIMBOUT")
+    fw_position_control = FW_POSITION_CONTROL.read_text(encoding="utf-8")
+    touchdown_load_expression = "float normal_load = -accel.xyz[2] / CONSTANTS_ONE_G;"
+    if fw_position_control.count(touchdown_load_expression) != 2:
+        fail("straight and circular landing must both convert FRD down acceleration to positive normal load")
+    if fw_position_control.count("PX4_ISFINITE(landing_height)") != 2:
+        fail("straight and circular canard touchdown detection must use landing-referenced height")
+    if fw_position_control.count("touchdown_load_detected") != 4:
+        fail("straight and circular canard touchdown detection must peak-hold the normal load")
+    for item in (
+        "param set-default FW_CANARD_LND_NZ 1.3",
+        "param set-default FW_CANARD_LND_H2 1.0",
+        "param set-default FW_CANARD_LND_PK 0.2",
+    ):
+        if item not in text:
+            fail(f"missing V8 robust canard touchdown setting: {item}")
     for i in range(1, 7):
         for item in (f"MINA{i} -30", f"ZEROA{i} 0", f"MAXA{i} 30"):
             if item not in text:
@@ -693,7 +786,9 @@ def check_geographic_origin():
 def main():
     gen = load_generator()
     root = ET.parse(SDF).getroot()
-    check_mass_and_inertia(root, gen)
+    check_mass_and_inertia(root, gen, 150.0)
+    if TEST_100_SDF.exists():
+        check_mass_and_inertia(ET.parse(TEST_100_SDF).getroot(), gen, 100.0)
     check_sdf_contract(root, gen)
     check_control_signs()
     check_frame_interfaces()
@@ -705,7 +800,8 @@ def main():
     check_airframe()
     check_geographic_origin()
     print("Honghu V8 static contract: PASS")
-    print("  mass=150 kg, CG=base_link, target FLU inertia closed")
+    print("  73 kg full-fuel aircraft + adjustable ballast mass model closed")
+    print("  100/150 kg assembled CG=base_link; 150 kg Word inertia and 100 kg compositional inertia closed")
     print("  control signs: positive delta_doc produces the required FRD/FLU moments")
     print("  world ENU/NED, body FLU/FRD, sensor, aerodynamic and propulsion interfaces verified")
     print("  takeoff/cruise/landing pitch authority and height-triggered time transitions verified")

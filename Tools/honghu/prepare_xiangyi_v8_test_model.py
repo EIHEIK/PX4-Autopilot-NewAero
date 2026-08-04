@@ -8,6 +8,7 @@ an upstream model change cannot silently produce a malformed test derivative.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 from pathlib import Path
 
 
@@ -16,13 +17,22 @@ SOURCE_DIR = ROOT / "simulation_models/models/honghu_wing_150kg_v8"
 OUTPUT_DIR = ROOT / "simulation_models/models/honghu_wing_100kg_v8_xiangyi_test"
 SOURCE_SDF = SOURCE_DIR / "model.sdf"
 OUTPUT_SDF = OUTPUT_DIR / "model.sdf"
-
+GENERATOR = ROOT / "Tools/honghu/generate_honghu_v8_model.py"
 
 def replace_once(text: str, old: str, new: str) -> str:
     count = text.count(old)
     if count != 1:
         raise RuntimeError(f"expected exactly one occurrence of {old!r}, found {count}")
     return text.replace(old, new, 1)
+
+
+def load_generator():
+    spec = importlib.util.spec_from_file_location("honghu_v8_generator_for_xiangyi", GENERATOR)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load V8 generator: {GENERATOR}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 source_bytes = SOURCE_SDF.read_bytes()
@@ -34,7 +44,17 @@ text = replace_once(
     '<model name="honghu_wing_150kg_v8">',
     '<model name="honghu_wing_100kg_v8_xiangyi_test">',
 )
-text = replace_once(text, "<mass>149.16</mass>", "<mass>99.16</mass>")
+
+# Keep the complete 73 kg airframe identical to production.  Only the separate
+# ballast link changes mass, position and inertia.  The generator uses the same
+# physical ballast package at constant inertia per unit mass and solves its
+# location so the complete 100 kg model closes at x=-1.57 m.
+generator = load_generator()
+text = replace_once(
+    text,
+    generator.ballast_xml(generator.TARGET_150_MASS),
+    generator.ballast_xml(100.0),
+)
 text = replace_once(
     text,
     "<!-- Front-view CCW propeller: omega is +X, airframe reaction torque is -X. -->\n"
@@ -52,8 +72,8 @@ text = text.replace(
 
 marker = "  <!-- V8 coordinate contract:"
 test_notice = (
-    "  <!-- ISOLATED XIANGYI TEST DERIVATIVE: total mass 100 kg; V8/PDF inertia\n"
-    "       retained as an explicit assumption; +X FRD reaction-torque A/B case.\n"
+    "  <!-- ISOLATED XIANGYI TEST DERIVATIVE: 73 kg full-fuel aircraft plus\n"
+    "       27 kg adjustable ballast; +X FRD reaction-torque A/B case.\n"
     "       Generated from the stable 150 kg model; never edit it as production. -->\n"
 )
 if marker not in text:
@@ -87,4 +107,14 @@ print(f"source_sha256={source_sha256_before}")
 print(f"output={OUTPUT_SDF}")
 print(f"output_sha256={hashlib.sha256(OUTPUT_SDF.read_bytes()).hexdigest()}")
 print("test_total_mass_kg=100.0")
+ballast_mass, ballast_com, _ = generator.ballast_properties(100.0)
+_, _, target_inertia = generator.target_mass_properties(100.0)
+print(f"base_aircraft_mass_kg={generator.BASE_73_MASS:.12g}")
+print("base_aircraft_cg_pdf_frd_m=" + ",".join(f"{value:.12g}" for value in generator.BASE_73_CG_PDF_FRD))
+print("target_assembled_cg_pdf_frd_m=" + ",".join(f"{value:.12g}" for value in generator.TARGET_ASSEMBLED_CG_PDF_FRD))
+print(f"ballast_mass_kg={ballast_mass:.12g}")
+print("ballast_com_gz_m=" + ",".join(f"{value:.12g}" for value in ballast_com))
+print("target_inertia_gz_kgm2=" + ",".join(
+    f"{target_inertia[i][j]:.12g}" for i, j in ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2))
+))
 print("production_source_unchanged=true")

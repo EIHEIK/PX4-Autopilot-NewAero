@@ -12,8 +12,9 @@
 %   发动机表油门 = min(1.25 * FW_Thr / 100, 1)
 %   发动机反扭矩在 FRD 中取 +Mx
 %
-% 尚未得到翔仪单独提供的惯量修订值，因此暂时继续使用参数文档中的
-% 完整惯量张量。脚本输出属于“在该惯量假设下”的条件性核对结果。
+% 参数Word表3给出了73 kg（机内满油）和150 kg（载货状态）的完整
+% 惯量参数。本脚本按质量在二者之间线性插值得到100 kg惯量。该值是
+% “由供应数据推导”，不是100 kg构型的直接测量值。
 
 %% 1. 路径、常量和输出目录
 if ispc
@@ -23,14 +24,18 @@ else
 end
 
 repoRoot = fullfile(flyHome, "PX4-Autopilot-NewAero");
-csvFile = fullfile(flyHome, "px4_reference_docs", "current", ...
-    "翔仪飞控仿真结果.csv");
+if ~exist("csvFile", "var")
+    csvFile = fullfile(flyHome, "px4_reference_docs", "current", ...
+        "翔仪飞控仿真结果.csv");
+end
 aeroTableDir = fullfile(repoRoot, "simulation_models", "models", ...
     "honghu_wing_150kg_v8", "aero_tables");
 propellerFile = fullfile(repoRoot, "simulation_models", "models", ...
     "honghu_wing_150kg_v8", "propulsion_tables", "propeller.csv");
-outputDir = fullfile(repoRoot, "analysis_outputs", ...
-    "honghu_v8_xiangyi_matlab");
+if ~exist("outputDir", "var")
+    outputDir = fullfile(repoRoot, "analysis_outputs", ...
+        "honghu_v8_xiangyi_matlab");
+end
 
 if ~isfolder(outputDir)
     mkdir(outputDir);
@@ -45,11 +50,17 @@ sampleTime = 0.05;
 thrustDownRad = deg2rad(3.0);
 enginePointFRD = [-1.23, 0.0, -0.12];
 
-% 惯量积按照刚体动力学矩阵的符号写入。
+% Word表3中的顺序为Ixx/Iyy/Izz/Ixy/Ixz/Iyz。惯量积按照当前刚体
+% 动力学矩阵的符号写入；与Gazebo FLU的SDF字段还需做坐标转换。
+inertia73FRD = [25.33, 30.81, 50.98, -0.021, -2.592, -0.0002];
+inertia150FRD = [25.86, 39.14, 59.12, -0.017, -3.520, -0.0019];
+inertiaInterpolationFraction = (massKg - 73.0) / (150.0 - 73.0);
+inertia100FRD = inertia73FRD + inertiaInterpolationFraction * ...
+    (inertia150FRD - inertia73FRD);
 inertiaFRD = [ ...
-    25.86, -0.017, -3.520; ...
-   -0.017, 39.14,  -0.0019; ...
-   -3.520, -0.0019, 59.12];
+    inertia100FRD(1), inertia100FRD(4), inertia100FRD(5); ...
+    inertia100FRD(4), inertia100FRD(2), inertia100FRD(6); ...
+    inertia100FRD(5), inertia100FRD(6), inertia100FRD(3)];
 
 coefficientNames = ["CL", "CD", "CY", "Cl", "Cm", "Cn"];
 
@@ -57,6 +68,8 @@ disp("输入文件：")
 disp(csvFile)
 disp("输出目录：")
 disp(outputDir)
+disp("Word表3插值得到的100 kg FRD惯量参数 [Ixx Iyy Izz Ixy Ixz Iyz]：")
+disp(inertia100FRD)
 
 %% 2. 读取翔仪 CSV
 % 第一行是577个英文列名，第二行是中文说明，第三行开始是数值数据。
@@ -892,7 +905,9 @@ summary = struct;
 summary.generatedBy = "MATLAB R2025a sequential script";
 summary.massKg = massKg;
 summary.inertiaAssumption = ...
-    "PDF/V8 inertia retained because Xiangyi revised inertia was not provided";
+    "100 kg inertia linearly interpolated from Word table 3 at 73 and 150 kg";
+summary.inertiaInterpolationFraction = inertiaInterpolationFraction;
+summary.inertiaFRDKgm2 = inertiaFRD;
 summary.engineThrottleMapping = ...
     "u_table = min(1.25 * FW_Thr / 100, 1)";
 summary.engineReactionTorque = "+Mx_FRD";

@@ -35,7 +35,8 @@ GitHub private: git@github.com:EIHEIK/PX4-Autopilot-NewAero.git
 - 用翔仪RFU到PX4/PDF FRD的运动学自检后反算六分量；
 - 将翔仪约65%油门按1.25比例映射到V8发动机表约81.25%输入；
 - MATLAB R2025a脚本保持单文件、顺序执行、不依赖自编函数；
-- 结论为`CL/CD/Cl`在当前共同假设下条件一致，`CY/Cn`激励不足，`Cm`仍对100 kg惯量和推进力矩敏感；
+- 参数Word表3提供73/150 kg质量特性，100 kg隔离模型和离线反算已改为线性插值惯量；
+- 插值后`CL/CD/Cl`在当前共同假设下仍条件一致，`CY/Cn`激励不足，`Cm`仍对插值惯量和推进力矩敏感；
 - 100 kg较低离地速度主要可由质量平方根缩放解释，不要求假设升力表不同；
 - 新增4038和`honghu_wing_100kg_v8_xiangyi_test`仅用于隔离复现，不修改150 kg生产模型。
 
@@ -167,3 +168,24 @@ python3 Tools/honghu/run_honghu_v8_dynamic_acceptance.py takeoff --step-size 0.0
 python3 Tools/honghu/run_honghu_v8_dynamic_acceptance.py standard --step-size 0.002 --timeout 150 --no-assert
 python3 Tools/honghu/run_honghu_v8_dynamic_acceptance.py landing --step-size 0.002 --no-assert
 ```
+
+## 12. 100 kg与翔仪重新核对
+
+4038在惯量插值前的源码默认参数下完成两次新的完整任务，均到LAND项18；离地空速约
+40.25～40.37 m/s，起飞真值俯仰峰值约6.98～7.07°。翔仪与PX4全程水平差异RMS为
+53.85～54.97 m，主要仍来自转弯圆弧；高度RMSE为2.61～2.69 m，俯仰RMSE为
+1.74～1.80°。
+
+当前平飞实际升降舵标准差已由旧日志约1.11°降至0.02～0.08°，高频舵面往复消失。
+临时`FW_T_PTCH_DAMP=0.30`候选增大俯仰波动而被拒绝，4038保持0.15。4028和150 kg
+生产模型未修改。仓库摘要见`HONGHU_V8_XIANGYI_RERUN_2026-07-30.md`，完整报告以
+整体参考文档库同名文件为准。
+
+之后仅使用Word表3已有的73/150 kg质量特性线性插值得到100 kg惯量；Word未给出的
+参数不调整。上述两次完整任务保留为插值前闭环基线，不能替代当前插值惯量模型的
+动态回归。
+
+插值惯量模型随后完成701.856 s整条任务并到LAND项18；飞行功能检查通过，但该架次
+缺少两路V8真值记录，所以自动状态仍为FAIL。紧随其后的短程起飞回归正式PASS，气动
+与推进真值各记录1460个样本，验证了真实鸭翼角和诊断链。不得把两架次合称为单次
+“全项PASS”，也没有因此调整Word缺失参数。

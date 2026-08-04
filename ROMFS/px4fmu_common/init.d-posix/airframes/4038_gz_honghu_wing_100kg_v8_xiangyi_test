@@ -40,12 +40,25 @@ param set FW_CANARD_TO 0.4
 # The 100 kg plant must not inherit the 150 kg pitch-rate derivative gain
 # unchanged. Repeated flight and full-route ULogs showed that FW_PR_D=0.10
 # created a 3.86 Hz D-term / elevator limit cycle, while 0.03 removed it
-# without changing the takeoff or altitude envelope. The trim below transfers
+# without changing the takeoff or altitude envelope. A 0.05 candidate looked
+# better in sustained loiter but regressed the complete classic mission, so it
+# was rejected. The trim below transfers
 # the measured steady moment from the rate integrator into feed-forward:
 # FW_PR_I remains enabled and retains roughly 0.08 normalized units of
 # bidirectional authority instead of sitting at the -0.12 limit.
 param set FW_PR_D 0.03
 param set TRIM_PITCH -0.09
-# Keep the 100 kg full-route TECS setting used by the accepted isolated
-# experiments; the production 150 kg airframe has its own validated 0.30 value.
+# Full-route A/B tests on the 100 kg plant showed that reducing the cruise roll
+# limit from 30 to 25 deg reduced mean turn height loss by about 30%, pitch
+# activity by about 21%, and elevator activity by about 18%. NPFG cross-track
+# RMS increased by only about 3%. Keep this override isolated from the
+# validated 150 kg 4028 airframe.
+param set FW_R_LIM 25
+# Keep the accepted 100 kg full-route TECS setting. The pitch integrator stays
+# enabled at the inherited 0.05 gain. Candidates at 0.03 and 0.04 looked
+# smoother in sustained loiter / short routes, but recovered height too slowly
+# or regressed the complete classic mission and were rejected. A later
+# short-route candidate (PTCH_DAMP=0.25, ALT_TC=4.5) was rejected for the same
+# full-mission regression. The 150 kg airframe retains its own independently
+# validated PTCH_DAMP=0.30 and ALT_TC=3.5 values.
 param set FW_T_PTCH_DAMP 0.15

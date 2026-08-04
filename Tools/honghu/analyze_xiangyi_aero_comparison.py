@@ -43,18 +43,26 @@ DEFAULT_PLAN = Path("/home/fly/px4_reference_docs/current/模仿XY航线规划.p
 DEFAULT_OUTPUT = ROOT / "analysis_outputs/honghu_v8_xiangyi_comparison"
 
 COEFFICIENTS = ("CL", "CD", "CY", "Cl", "Cm", "Cn")
-MASS_KG = 150.0
+MASS_KG = 100.0
 AREA_M2 = 2.42
 SPAN_M = 3.96
 MAC_M = 0.62
 NOMINAL_DT_S = 0.05
 THRUST_DOWN_RAD = math.radians(3.0)
 ENGINE_POINT_FRD_M = np.array([-1.23, 0.0, -0.12])
+# Word table 3 provides complete inertia data at 73 kg and 150 kg.  The
+# Xiangyi 100 kg comparison uses a traceable linear interpolation between the
+# two supplied states; it is derived data rather than a direct 100 kg test.
+_INERTIA_73 = np.array([25.33, 30.81, 50.98, -0.021, -2.592, -0.0002])
+_INERTIA_150 = np.array([25.86, 39.14, 59.12, -0.017, -3.520, -0.0019])
+_INERTIA_100 = _INERTIA_73 + ((MASS_KG - 73.0) / (150.0 - 73.0)) * (
+    _INERTIA_150 - _INERTIA_73
+)
 INERTIA_FRD_KGM2 = np.array(
     [
-        [25.86, -0.017, -3.520],
-        [-0.017, 39.14, -0.0019],
-        [-3.520, -0.0019, 59.12],
+        [_INERTIA_100[0], _INERTIA_100[3], _INERTIA_100[4]],
+        [_INERTIA_100[3], _INERTIA_100[1], _INERTIA_100[5]],
+        [_INERTIA_100[4], _INERTIA_100[5], _INERTIA_100[2]],
     ]
 )
 
@@ -1778,8 +1786,12 @@ def analyze(arguments: argparse.Namespace) -> dict:
         "method": {
             "body_frame": "Xiangyi RFU converted to PDF/PX4 FRD",
             "specific_force": "9.8 * [Acc_Y, Acc_X, -Acc_Z] m/s2",
-            "force_relation": "F_aero = 150 * f_specific - F_propulsion",
+            "force_relation": f"F_aero = {MASS_KG:g} * f_specific - F_propulsion",
             "moment_relation": "M_aero = I*omega_dot + omega_cross_(I*omega) - M_propulsion",
+            "inertia_relation": (
+                "100 kg inertia linearly interpolated from Word table 3 "
+                "between 73 kg and 150 kg"
+            ),
             "surface_mapping": {
                 "delta_a_doc_deg": "FW_Ail",
                 "delta_e_doc_deg": "FW_Ele",

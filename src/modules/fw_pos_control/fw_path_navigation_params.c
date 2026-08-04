@@ -1140,6 +1140,23 @@ PARAM_DEFINE_FLOAT(FW_CANARD_LND_NZ, 1.5f);
 PARAM_DEFINE_FLOAT(FW_CANARD_LND_H2, 5.0f);
 
 /**
+ * Canard touchdown normal-load peak hold time
+ *
+ * Keeps a detected touchdown normal-load peak valid for a short time so that
+ * the landing controller cannot miss a narrow impact pulse. When greater than
+ * zero, the landing controller's terrain-referenced height is also used as the
+ * fallback AGL source. A value of zero preserves the legacy behavior.
+ *
+ * @unit s
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_CANARD_LND_PK, 0.0f);
+
+/**
  * Canard retraction ground speed threshold
  *
  * 地速低于此值时鸭翼从刹车态收回中立并锁存（phase 2→3）。

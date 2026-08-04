@@ -277,6 +277,7 @@ class DynamicRun:
         make_target: str = "gz_honghu_wing_150kg_v8",
         expected_canard_deg: float = 6.0,
         through_touchdown: bool = False,
+        touchdown_brake_only: bool = False,
         physics_engine: str | None = None,
         spawn_x_m: float = 0.0,
         spawn_y_m: float = 0.0,
@@ -294,6 +295,7 @@ class DynamicRun:
         self.make_target = make_target
         self.expected_canard_deg = expected_canard_deg
         self.through_touchdown = through_touchdown
+        self.touchdown_brake_only = touchdown_brake_only
         self.physics_engine = physics_engine
         self.spawn_x_m = spawn_x_m
         self.spawn_y_m = spawn_y_m
@@ -489,7 +491,12 @@ class DynamicRun:
         elif self.scenario == "landing":
             specifications = [
                 (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0.0, 1000.0, 40.0, 50.0),
-                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0.0, 1600.0, 50.0, 100.0),
+                # Landing acceptance validates the approach, touchdown and
+                # ground roll rather than climb performance. Keep this handoff
+                # at the takeoff item's 40 m altitude: otherwise a low climb
+                # rate can make Navigator orbit the waypoint to acquire 50 m,
+                # entering LAND hundreds of metres off the final approach.
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0.0, 1600.0, 40.0, 100.0),
                 (mavutil.mavlink.MAV_CMD_NAV_LAND, 0.0, 3000.0, 0.0, 100.0),
             ]
         else:
@@ -679,6 +686,7 @@ class DynamicRun:
         loiter_ready_since = None
         landing_start = None
         touchdown_stable_since = None
+        touchdown_detected_since = None
         initial_x = float(initial_local.x)
         initial_y = float(initial_local.y)
         initial_z = float(initial_local.z)
@@ -818,20 +826,37 @@ class DynamicRun:
                     if landing_start is None:
                         landing_start = now
                     if self.through_touchdown:
-                        touchdown_stable = (
-                            sample["landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
-                            and sample["groundspeed_m_s"] < 1.0
-                            and sample["altitude_gain_m"] < 1.0
-                        )
-                        if touchdown_stable:
-                            touchdown_stable_since = touchdown_stable_since or now
+                        if self.touchdown_brake_only:
+                            touchdown_detected = (
+                                sample["landed_state"]
+                                == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                                or sample["gazebo_altitude_gain_m"] <= 0.55
+                            )
+                            if touchdown_detected and touchdown_detected_since is None:
+                                touchdown_detected_since = now
+                            # FW_CANARD_BRKD is 5 s. Retain another 3 s so the
+                            # ULog proves the -50 deg brake state without
+                            # requiring the simplified wheel model to stop.
+                            if (
+                                touchdown_detected_since is not None
+                                and now - touchdown_detected_since >= 8.0
+                            ):
+                                break
                         else:
-                            touchdown_stable_since = None
-                        if (
-                            touchdown_stable_since is not None
-                            and now - touchdown_stable_since >= 2.0
-                        ) or now - landing_start >= 90.0:
-                            break
+                            touchdown_stable = (
+                                sample["landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                                and sample["groundspeed_m_s"] < 1.0
+                                and sample["altitude_gain_m"] < 1.0
+                            )
+                            if touchdown_stable:
+                                touchdown_stable_since = touchdown_stable_since or now
+                            else:
+                                touchdown_stable_since = None
+                            if (
+                                touchdown_stable_since is not None
+                                and now - touchdown_stable_since >= 2.0
+                            ) or now - landing_start >= 90.0:
+                                break
                     else:
                         # Retain the approach and first low-altitude segment for
                         # coefficient validation without requiring touchdown.
@@ -1422,6 +1447,10 @@ class DynamicRun:
                     "final_landed_state": samples[-1]["landed_state"],
                     "final_groundspeed_m_s": samples[-1]["groundspeed_m_s"],
                     "final_altitude_m": samples[-1]["gazebo_altitude_gain_m"],
+                    "post_touchdown_record_duration_s": (
+                        samples[-1]["wall_time_s"] - contact["wall_time_s"]
+                        if contact else float("nan")
+                    ),
                 })
             checks = {
                 "rotation_detected": rotation is not None,
@@ -1449,7 +1478,7 @@ class DynamicRun:
                 and metrics["airborne_canard_max_deg"] <= self.expected_canard_deg + 0.5,
             }
             if self.through_touchdown:
-                checks.update({
+                touchdown_checks = {
                     "touchdown_detected": metrics["touchdown_detected"],
                     "touchdown_sink_rate_below_1m_s": math.isfinite(
                         metrics["touchdown_vertical_speed_m_s"]
@@ -1461,10 +1490,19 @@ class DynamicRun:
                     "touchdown_does_not_fall_through_ground": math.isfinite(
                         metrics["post_touchdown_altitude_min_m"]
                     ) and metrics["post_touchdown_altitude_min_m"] > -0.5,
-                    "landing_stops_and_reports_on_ground":
-                    metrics["final_landed_state"] == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
-                    and metrics["final_groundspeed_m_s"] < 1.0,
-                })
+                }
+                if self.touchdown_brake_only:
+                    touchdown_checks["post_touchdown_record_covers_canard_brake"] = (
+                        math.isfinite(metrics["post_touchdown_record_duration_s"])
+                        and metrics["post_touchdown_record_duration_s"] >= 7.5
+                    )
+                else:
+                    touchdown_checks["landing_stops_and_reports_on_ground"] = (
+                        metrics["final_landed_state"]
+                        == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND
+                        and metrics["final_groundspeed_m_s"] < 1.0
+                    )
+                checks.update(touchdown_checks)
         else:
             ground_samples = [
                 sample for sample in samples
@@ -1763,6 +1801,13 @@ def main() -> None:
         help="for the standard plan, continue through touchdown and require a stable stop",
     )
     parser.add_argument(
+        "--touchdown-brake-only", action="store_true",
+        help=(
+            "for the standard plan, record 8 s after touchdown so the canard "
+            "brake transition is captured without requiring a full stop"
+        ),
+    )
+    parser.add_argument(
         "--physics-engine",
         choices=("gz-physics-dartsim-plugin", "gz-physics-bullet-featherstone-plugin"),
         help="temporary Gazebo physics-engine plugin; omitted keeps the normal DART default",
@@ -1780,8 +1825,11 @@ def main() -> None:
     arguments.plan = arguments.plan.resolve()
     if arguments.scenario == "standard" and not arguments.plan.exists():
         parser.error(f"standard plan does not exist: {arguments.plan}")
-    if arguments.through_touchdown and arguments.scenario != "standard":
-        parser.error("--through-touchdown is supported only by the standard scenario")
+    if (arguments.through_touchdown or arguments.touchdown_brake_only) \
+            and arguments.scenario != "standard":
+        parser.error("touchdown continuation is supported only by the standard scenario")
+    if arguments.through_touchdown and arguments.touchdown_brake_only:
+        parser.error("--through-touchdown and --touchdown-brake-only are mutually exclusive")
     if not arguments.make_target.startswith("gz_honghu_wing_"):
         parser.error("--make-target must be a Honghu Gazebo target")
     default_timeouts = {
@@ -1818,7 +1866,8 @@ def main() -> None:
         arguments.plan,
         arguments.make_target,
         arguments.expected_canard_deg,
-        arguments.through_touchdown,
+        arguments.through_touchdown or arguments.touchdown_brake_only,
+        arguments.touchdown_brake_only,
         arguments.physics_engine,
         arguments.spawn_x,
         arguments.spawn_y,

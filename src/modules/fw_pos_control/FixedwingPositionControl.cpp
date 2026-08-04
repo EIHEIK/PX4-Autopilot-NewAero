@@ -181,6 +181,7 @@ FixedwingPositionControl::vehicle_control_mode_poll()
 				_canard_retracted = false;//鸭翼重置为未收回态
 				_canard_braked = false;//鸭翼空气刹车状态清零
 				_canard_touchdown_phase = 0;//鸭翼接地阶段清零
+				_canard_touchdown_load_time = 0;//接地过载峰值保持清零
 				_canard_trim_offset = 0.f;//鸭翼配平补偿清零
 			}
 		}
@@ -2588,14 +2589,25 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
 
-	// 鸭翼着陆时序 0-3
-	//（升降舵最大低头 + 鸭翼保持）2026.5.30修改
+	// 鸭翼着陆时序 0-3：接地后先收回，延时后进入气动刹车
 	if (!_canard_retracted && _canard_deployed && _canard_touchdown_phase == 0) {
 		vehicle_acceleration_s accel;
 
 		if (_vehicle_acceleration_sub.copy(&accel)
 		    && PX4_ISFINITE(accel.xyz[2])) {
 			float normal_load = -accel.xyz[2] / CONSTANTS_ONE_G;
+			const float load_peak_hold_s = math::max(_param_fw_canard_lnd_pk.get(), 0.f);
+
+			if (normal_load > _param_fw_canard_lnd_nz.get()) {
+				_canard_touchdown_load_time = now;
+			}
+
+			const bool touchdown_load_detected =
+				(normal_load > _param_fw_canard_lnd_nz.get())
+				|| (load_peak_hold_s > FLT_EPSILON
+				    && _canard_touchdown_load_time != 0
+				    && now >= _canard_touchdown_load_time
+				    && now - _canard_touchdown_load_time <= load_peak_hold_s * 1_s);
 
 			bool agl_valid = false;
 			float agl_height = 0.f;
@@ -2604,7 +2616,14 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 				agl_height = _local_pos.dist_bottom;
 				agl_valid = true;
 
+			} else if (load_peak_hold_s > FLT_EPSILON && PX4_ISFINITE(landing_height)) {
+				// Robust V8 fallback: this height is referenced to the landing
+				// controller's terrain/landing-surface estimate.
+				agl_height = landing_height;
+				agl_valid = true;
+
 			} else if (PX4_ISFINITE(_current_altitude) && PX4_ISFINITE(_takeoff_ground_alt)) {
+				// Legacy fallback retained when peak holding is disabled.
 				agl_height = _current_altitude - _takeoff_ground_alt;
 				agl_valid = (agl_height >= 0.f);
 			}
@@ -2617,8 +2636,8 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 			if (PX4_ISFINITE(normal_load)
 			    && agl_valid
 			    && agl_height < lnd_h_threshold
-			    && normal_load > _param_fw_canard_lnd_nz.get()) {
-				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
+			    && touchdown_load_detected) {
+				// 进入阶段1：鸭翼收回到FW_CANARD_RETR，升降舵继续由正常降落控制
 				_canard_touchdown_time = now;
 				_canard_touchdown_phase = 1;
 			}
@@ -2864,13 +2883,25 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
 
-	// 鸭翼着陆时序：阶段0→阶段1（升降舵最大低头 + 鸭翼保持）
+	// 鸭翼着陆时序：阶段0→阶段1（接地后先收回，延时后进入气动刹车）
 	if (!_canard_retracted && _canard_deployed && _canard_touchdown_phase == 0) {
 		vehicle_acceleration_s accel;
 
 		if (_vehicle_acceleration_sub.copy(&accel)
 		    && PX4_ISFINITE(accel.xyz[2])) {
-			float normal_load = accel.xyz[2] / CONSTANTS_ONE_G;
+			float normal_load = -accel.xyz[2] / CONSTANTS_ONE_G;
+			const float load_peak_hold_s = math::max(_param_fw_canard_lnd_pk.get(), 0.f);
+
+			if (normal_load > _param_fw_canard_lnd_nz.get()) {
+				_canard_touchdown_load_time = now;
+			}
+
+			const bool touchdown_load_detected =
+				(normal_load > _param_fw_canard_lnd_nz.get())
+				|| (load_peak_hold_s > FLT_EPSILON
+				    && _canard_touchdown_load_time != 0
+				    && now >= _canard_touchdown_load_time
+				    && now - _canard_touchdown_load_time <= load_peak_hold_s * 1_s);
 
 			bool agl_valid = false;
 			float agl_height = 0.f;
@@ -2879,7 +2910,14 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 				agl_height = _local_pos.dist_bottom;
 				agl_valid = true;
 
+			} else if (load_peak_hold_s > FLT_EPSILON && PX4_ISFINITE(landing_height)) {
+				// Robust V8 fallback: this height is referenced to the landing
+				// controller's terrain/landing-surface estimate.
+				agl_height = landing_height;
+				agl_valid = true;
+
 			} else if (PX4_ISFINITE(_current_altitude) && PX4_ISFINITE(_takeoff_ground_alt)) {
+				// Legacy fallback retained when peak holding is disabled.
 				agl_height = _current_altitude - _takeoff_ground_alt;
 				agl_valid = (agl_height >= 0.f);
 			}
@@ -2892,8 +2930,8 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 			if (PX4_ISFINITE(normal_load)
 			    && agl_valid
 			    && agl_height < lnd_h_threshold
-			    && normal_load > _param_fw_canard_lnd_nz.get()) {
-				// 进入阶段1：升降舵强制最大低头，鸭翼保持当前偏角
+			    && touchdown_load_detected) {
+				// 进入阶段1：鸭翼收回到FW_CANARD_RETR，升降舵继续由正常降落控制
 				_canard_touchdown_time = now;
 				_canard_touchdown_phase = 1;
 			}
@@ -3387,7 +3425,7 @@ FixedwingPositionControl::Run()
 		_flaps_setpoint = 0.f;
 		_spoilers_setpoint = 0.f;
 
-		// 鸭翼着陆阶段2：升降舵极限偏转1秒后，鸭翼极限上偏（空气刹车）
+		// 鸭翼着陆阶段2：接地收回并延时后，鸭翼极限上偏（空气刹车）
 		if (_canard_touchdown_phase == 1) {
 			if (_local_pos.timestamp - _canard_touchdown_time > (_param_fw_canard_brkd.get() * 1_s)) {
 				_canard_braked = true;
@@ -3699,6 +3737,7 @@ FixedwingPositionControl::reset_landing_state()
 	_lateral_touchdown_position_offset = 0.0f;
 
 	_last_time_terrain_alt_was_valid = 0;
+	_canard_touchdown_load_time = 0;
 
 	// reset abort land, unless loitering after an abort
 	if (_landing_abort_status && (_pos_sp_triplet.current.type != position_setpoint_s::SETPOINT_TYPE_LOITER)) {

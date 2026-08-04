@@ -3,6 +3,8 @@ source:
   version: V2.5(2)
   convention: PDF/PX4 FRD
 measured_or_supplied:
+  mass_properties_73kg: Word_table_3_full_internal_fuel; m_73kg; CGz_-0.03m; complete_inertia_tensor
+  mass_properties_150kg: Word_table_2_and_3; m_150kg; target_CG_-1.57_0_0m; complete_inertia_tensor
   static_aero: tables 4-9
   dynamic_derivatives: table 10
   control_derivatives: tables 11-18
@@ -13,7 +15,12 @@ derived:
   negative_aileron: aircraft_reflection_symmetry
   fuel_6000m_40mps_20pct: 1.02_kg_h_interpolated_from_16_and_25_pct
 engineering_assumptions:
-  mass_properties: fixed_150kg
+  mass_properties: compositional_73kg_aircraft_plus_adjustable_ballast
+  mass_reference: aerodynamic_reference_and_100_150kg_target_CG_at_PDF_FRD_-1.57_0_0m
+  mass_73kg_cg: PDF_FRD_-1.58_0_-0.03m; x_is_minimum_10mm_aft_engineering_assumption_pending_measurement; printed_-1.56_rejected_as_typo
+  ballast_150kg: 77kg_at_GZ_0.009480519_0_-0.028441558m; intrinsic_tensor_solved_to_close_Word_150kg_total_inertia
+  ballast_100kg: 27kg_at_GZ_0.027037037_0_-0.081111111m; same_ballast_geometry_and_constant_inertia_per_mass
+  inertia_100kg: compositional_parallel_axis_result_not_direct_73_150_linear_interpolation
   gear: rigid_wheel_carriers_phase_1; main_wheels_free_spin; nose_wheel_steered_and_free_spin
   gear_coordinates: PDF_points_converted_to_CG_centered_Gazebo_FLU
   ground_contact: main_mu_mu2_0.8_2.0; nose_mu_mu2_1.0_1.0; kp_2e6; kd_2e4; max_vel_0.2m_s; min_depth_0.5mm
