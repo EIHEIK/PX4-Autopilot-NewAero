@@ -1,0 +1,65 @@
+diff --git a/freecad/agent-harness/cli_anything/freecad/core/export.py b/freecad/agent-harness/cli_anything/freecad/core/export.py
+index 1317e94..aee7ac3 100644
+--- a/freecad/agent-harness/cli_anything/freecad/core/export.py
++++ b/freecad/agent-harness/cli_anything/freecad/core/export.py
+@@ -311,7 +311,8 @@ def export_project(
+     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+ 
+     # Generate the FreeCAD macro script
+-    macro_content = generate_macro(project, output_path, export_format=export_format)
++    freecad_output_path = freecad_backend.path_for_freecad(output_path)
++    macro_content = generate_macro(project, freecad_output_path, export_format=export_format)
+ 
+     # Execute via the headless backend
+     result = freecad_backend.export_headless(
+diff --git a/freecad/agent-harness/cli_anything/freecad/utils/freecad_backend.py b/freecad/agent-harness/cli_anything/freecad/utils/freecad_backend.py
+index 6b07cb9..4b58cc1 100644
+--- a/freecad/agent-harness/cli_anything/freecad/utils/freecad_backend.py
++++ b/freecad/agent-harness/cli_anything/freecad/utils/freecad_backend.py
+@@ -124,6 +124,38 @@ def find_freecad(gui_required: bool = False) -> str:
+     raise RuntimeError(_INSTALL_INSTRUCTIONS)
+ 
+ 
++def _uses_windows_freecad(freecad: str) -> bool:
++    """Return True when WSL is launching a Windows FreeCAD executable."""
++    return platform.system() == "Linux" and freecad.lower().endswith(".exe")
++
++
++def path_for_freecad(path: str, freecad: Optional[str] = None) -> str:
++    """Translate a WSL path to a Windows/UNC path when required.
++
++    Native Linux and macOS FreeCAD installations receive the original absolute
++    path. A Windows executable launched through WSL receives the value emitted
++    by ``wslpath -w`` so that macro, input, and output files remain reachable.
++    """
++    absolute = str(Path(path).resolve())
++    executable = freecad or find_freecad()
++    if not _uses_windows_freecad(executable):
++        return absolute
++
++    try:
++        converted = subprocess.run(
++            ["wslpath", "-w", absolute],
++            capture_output=True,
++            text=True,
++            timeout=10,
++            check=True,
++        ).stdout.strip()
++    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
++        raise RuntimeError(f"Failed to translate WSL path for Windows FreeCAD: {absolute}: {exc}") from exc
++    if not converted:
++        raise RuntimeError(f"wslpath returned an empty path for: {absolute}")
++    return converted
++
++
+ # ---------------------------------------------------------------------------
+ # Internal helpers
+ # ---------------------------------------------------------------------------
+@@ -275,7 +307,7 @@ def run_macro(
+         ``{"command": str, "returncode": int, "stdout": str, "stderr": str}``
+     """
+     freecad = find_freecad(gui_required=gui_required)
+-    script_path = str(Path(script_path).resolve())
++    script_path = path_for_freecad(script_path, freecad=freecad)
+ 
+     result = _run(_macro_command(freecad, script_path, gui_required=gui_required), timeout=timeout, env=env)

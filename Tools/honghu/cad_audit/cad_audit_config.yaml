@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "status": "cad_candidate_pending_field_measurement",
+  "freecad_cmd_wsl": "/mnt/d/Program Files/FreeCAD 1.1/bin/freecadcmd.exe",
+  "step_models": [
+    {
+      "id": "HHY-260113.2",
+      "path": "/home/fly/px4_reference_docs/current/HHYmodel/20260105/HHY-260113.2.stp"
+    },
+    {
+      "id": "HHY-260113",
+      "path": "/home/fly/px4_reference_docs/current/HHYmodel/20260105/HHY-260113.stp"
+    }
+  ],
+  "object_labels": {
+    "left_main_wheel": ["jl"],
+    "right_main_wheel": ["Symmetry of jl"],
+    "nose_wheel": ["Part004"],
+    "gear_roots": ["SZYA-12", "SZYA-13"]
+  },
+  "step_axes": {
+    "lateral": "X",
+    "longitudinal": "Y",
+    "vertical": "Z",
+    "gazebo_left_sign": -1.0,
+    "gazebo_forward_sign": 1.0
+  },
+  "candidate_alignment": {
+    "policy": "preserve_v8_main_axle_x_and_ground_contact_plane",
+    "main_axle_x_m": -0.291274,
+    "ground_contact_z_m": -0.5145,
+    "nose_centerline_y_m": 0.0,
+    "main_strut_body_anchors_m": {
+      "left": [-0.18, 0.23, -0.06],
+      "right": [-0.18, -0.23, -0.06]
+    },
+    "nose_strut_body_anchor_m": [0.64, 0.0, -0.06],
+    "strut_radius_m": 0.018
+  },
+  "v8_baseline": {
+    "model": "honghu_wing_150kg_v8",
+    "left_main_center_m": [-0.291274, 0.524303, -0.4551],
+    "right_main_center_m": [-0.291274, -0.524303, -0.4551],
+    "nose_center_m": [0.924852, 0.0, -0.4706],
+    "main_wheel_radius_m": 0.0594,
+    "main_wheel_width_m": 0.106,
+    "nose_wheel_radius_m": 0.0439,
+    "nose_wheel_width_m": 0.1363
+  },
+  "tolerances": {
+    "step_agreement_mm": 0.1,
+    "wheel_fit_residual_mm": 1.0,
+    "sdf_geometry_mm": 1.0,
+    "field_track_wheelbase_mm": 10.0,
+    "field_wheel_dimensions_mm": 5.0
+  },
+  "field_measurements_mm": null
+}

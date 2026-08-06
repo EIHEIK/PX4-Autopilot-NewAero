@@ -1,0 +1,17 @@
+metric,definition,cad_candidate_mm,field_measured_mm,tolerance_mm,notes
+main_wheel_track,左右主轮旋转轴中心之间的横向距离,1151.160,,10,
+wheelbase,主轮轴中心线到前轮轴中心的纵向距离,814.878,,10,
+left_main_wheel_diameter,左主轮轮胎外包络直径,151.781,,5,
+right_main_wheel_diameter,右主轮轮胎外包络直径,151.781,,5,
+main_wheel_width,沿主轮轴方向的轮胎外包络宽度,44.322,,5,
+nose_wheel_diameter,前轮轮胎外包络直径,140.000,,5,
+nose_wheel_width,沿前轮轴方向的轮胎外包络宽度,41.000,,5,
+left_main_body_attach_x,左主起落架机身连接点相对统一机体基准的纵向坐标,,,请注明基准和正方向
+left_main_body_attach_y,左主起落架机身连接点相对统一机体基准的横向坐标,,,请注明基准和正方向
+left_main_body_attach_z,左主起落架机身连接点相对统一机体基准的垂向坐标,,,请注明基准和正方向
+right_main_body_attach_x,右主起落架机身连接点相对统一机体基准的纵向坐标,,,请注明基准和正方向
+right_main_body_attach_y,右主起落架机身连接点相对统一机体基准的横向坐标,,,请注明基准和正方向
+right_main_body_attach_z,右主起落架机身连接点相对统一机体基准的垂向坐标,,,请注明基准和正方向
+nose_body_attach_x,前起落架机身连接点相对统一机体基准的纵向坐标,,,请注明基准和正方向
+nose_body_attach_y,前起落架机身连接点相对统一机体基准的横向坐标,,,请注明基准和正方向
+nose_body_attach_z,前起落架机身连接点相对统一机体基准的垂向坐标,,,请注明基准和正方向
