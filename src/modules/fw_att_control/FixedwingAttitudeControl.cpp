@@ -94,18 +94,31 @@ void FixedwingAttitudeControl::update_pitch_rate_limit(const float dt)
 {
 	const float cruise_limit = radians(_param_fw_p_rmax_pos.get());
 	float phase_limit = cruise_limit;
+	const float cruise_time_constant = _param_fw_p_tc.get();
+	float phase_time_constant = cruise_time_constant;
 
-	if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF
-	    && _param_fw_p_rmax_tko.get() >= 0.f) {
-		phase_limit = radians(_param_fw_p_rmax_tko.get());
+	if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF) {
+		if (_param_fw_p_rmax_tko.get() >= 0.f) {
+			phase_limit = radians(_param_fw_p_rmax_tko.get());
+		}
 
-	} else if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING
-		   && _param_fw_p_rmax_lnd.get() >= 0.f) {
-		phase_limit = radians(_param_fw_p_rmax_lnd.get());
+		phase_time_constant = _param_fw_p_tc_tko.get() >= 0.f ?
+				      _param_fw_p_tc_tko.get() : cruise_time_constant;
+
+	} else if (_att_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING) {
+		if (_param_fw_p_rmax_lnd.get() >= 0.f) {
+			phase_limit = radians(_param_fw_p_rmax_lnd.get());
+		}
+
+		phase_time_constant = _param_fw_p_tc_lnd.get() >= 0.f ?
+				      _param_fw_p_tc_lnd.get() : cruise_time_constant;
 	}
 
 	const float phase_blend = math::constrain(_att_sp.fw_pitch_limit_blend, 0.f, 1.f);
 	const float target_limit = cruise_limit + phase_blend * (phase_limit - cruise_limit);
+	const float target_time_constant = cruise_time_constant
+				   + phase_blend * (phase_time_constant - cruise_time_constant);
+	_pitch_ctrl.set_time_constant(target_time_constant);
 
 	if (!PX4_ISFINITE(_pitch_rate_limit_pos_current)) {
 		_pitch_rate_limit_pos_current = target_limit;

@@ -37,28 +37,52 @@ param set RWTO_ROT_AIRSPD 30.0
 # mapping uses +15 deg at a normalized takeoff command of 1.
 param set FW_CANARD_TO 0.4
 
-# The 100 kg plant must not inherit the 150 kg pitch-rate derivative gain
-# unchanged. Repeated flight and full-route ULogs showed that FW_PR_D=0.10
-# created a 3.86 Hz D-term / elevator limit cycle, while 0.03 removed it
-# without changing the takeoff or altitude envelope. A 0.05 candidate looked
-# better in sustained loiter but regressed the complete classic mission, so it
-# was rejected. The trim below transfers
-# the measured steady moment from the rate integrator into feed-forward:
-# FW_PR_I remains enabled and retains roughly 0.08 normalized units of
-# bidirectional authority instead of sitting at the -0.12 limit.
-param set FW_PR_D 0.03
-param set TRIM_PITCH -0.09
+# 2026-08-04 bounded rate identification and repeated AUTO routes established
+# this 100 kg-only longitudinal baseline. Subsequent full-route testing with
+# phase-isolated gains increased only the cruise P feedback to 1.30; takeoff
+# and landing retain the original 0.90 value. The integrator remains enabled
+# for unknown trim in every phase.
+param set FW_PR_FF 0.60
+param set FW_PR_P 1.30
+param set FW_PR_I 0.04
+param set FW_PR_D 0.04
+# Keep the validated near-ground controller independent from the stronger
+# cruise feedback. The existing 50 m / 5 s phase schedule blends these gains
+# without resetting the pitch-rate integrator. A 2026-08-05 full-route test
+# reduced cruise pitch HP activity by 16% and height RMS by 11%, without
+# increasing elevator HP activity.
+param set FW_PR_P_TKO 0.90
+param set FW_PR_I_TKO 0.04
+param set FW_PR_D_TKO 0.04
+param set FW_PR_P_LND 0.90
+param set FW_PR_I_LND 0.04
+param set FW_PR_D_LND 0.04
+param set FW_P_TC 0.80
+param set FW_P_TC_TKO 0.80
+param set FW_P_TC_LND 0.80
+
+# Keep the physical elevator trim approximately constant over the 40--50 m/s
+# envelope. PX4 scales TRIM_PITCH with inverse airspeed squared; the official
+# DTRIM schedule compensates that scaling while the retained rate integrator
+# removes the remaining model/operating-point error.
+param set TRIM_PITCH -0.125
+param set FW_DTRIM_P_VMIN 0.12
+param set FW_DTRIM_P_VMAX -0.05
 # Full-route A/B tests on the 100 kg plant showed that reducing the cruise roll
 # limit from 30 to 25 deg reduced mean turn height loss by about 30%, pitch
 # activity by about 21%, and elevator activity by about 18%. NPFG cross-track
 # RMS increased by only about 3%. Keep this override isolated from the
 # validated 150 kg 4028 airframe.
 param set FW_R_LIM 25
-# Keep the accepted 100 kg full-route TECS setting. The pitch integrator stays
-# enabled at the inherited 0.05 gain. Candidates at 0.03 and 0.04 looked
-# smoother in sustained loiter / short routes, but recovered height too slowly
-# or regressed the complete classic mission and were rejected. A later
-# short-route candidate (PTCH_DAMP=0.25, ALT_TC=4.5) was rejected for the same
-# full-mission regression. The 150 kg airframe retains its own independently
-# validated PTCH_DAMP=0.30 and ALT_TC=3.5 values.
-param set FW_T_PTCH_DAMP 0.15
+# 2026-08-05 correction: whole-flight averages hid a growing 0.24 Hz mode.
+# TECS replay proved that SEB_R_FF=1.0 and PTCH_DAMP=0.15 contributed in phase
+# in the affected operating point. Two complete missions with the official
+# minimum SEB feedforward and zero energy-rate damping changed the response
+# from growing to decaying: pitch HP std 0.253--0.255 deg, worst 30 s std
+# 0.523--0.530 deg, and final/initial window ratio 0.53--0.58. Both flights
+# completed the mission; the touchdown repeat retained the existing landing
+# and canard-brake behavior. The pitch integrator remains enabled.
+param set FW_T_PTCH_DAMP 0.0
+param set FW_T_I_GAIN_PIT 0.05
+param set FW_T_ALT_TC 4.5
+param set FW_T_SEB_R_FF 0.5

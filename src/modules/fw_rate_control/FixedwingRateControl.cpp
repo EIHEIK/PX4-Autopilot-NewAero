@@ -92,6 +92,42 @@ FixedwingRateControl::parameters_update()
 	return PX4_OK;
 }
 
+void FixedwingRateControl::updatePitchPidGains()
+{
+	const float cruise_p = _param_fw_pr_p.get();
+	const float cruise_i = _param_fw_pr_i.get();
+	const float cruise_d = _param_fw_pr_d.get();
+	float phase_p = cruise_p;
+	float phase_i = cruise_i;
+	float phase_d = cruise_d;
+	float phase_blend = 0.f;
+
+	// Apply phase gains only to attitude-controlled flight. Acro/rate mode keeps
+	// the normal gains even if the last automatic attitude setpoint was phased.
+	if (_vcontrol_mode.flag_control_attitude_enabled) {
+		phase_blend = math::constrain(_attitude_sp.fw_pitch_limit_blend, 0.f, 1.f);
+
+		if (_attitude_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_TAKEOFF) {
+			phase_p = _param_fw_pr_p_tko.get() >= 0.f ? _param_fw_pr_p_tko.get() : cruise_p;
+			phase_i = _param_fw_pr_i_tko.get() >= 0.f ? _param_fw_pr_i_tko.get() : cruise_i;
+			phase_d = _param_fw_pr_d_tko.get() >= 0.f ? _param_fw_pr_d_tko.get() : cruise_d;
+
+		} else if (_attitude_sp.fw_pitch_mode == vehicle_attitude_setpoint_s::FW_PITCH_MODE_LANDING) {
+			phase_p = _param_fw_pr_p_lnd.get() >= 0.f ? _param_fw_pr_p_lnd.get() : cruise_p;
+			phase_i = _param_fw_pr_i_lnd.get() >= 0.f ? _param_fw_pr_i_lnd.get() : cruise_i;
+			phase_d = _param_fw_pr_d_lnd.get() >= 0.f ? _param_fw_pr_d_lnd.get() : cruise_d;
+		}
+	}
+
+	const float pitch_p = cruise_p + phase_blend * (phase_p - cruise_p);
+	const float pitch_i = cruise_i + phase_blend * (phase_i - cruise_i);
+	const float pitch_d = cruise_d + phase_blend * (phase_d - cruise_d);
+	const Vector3f rate_p(_param_fw_rr_p.get(), pitch_p, _param_fw_yr_p.get());
+	const Vector3f rate_i(_param_fw_rr_i.get(), pitch_i, _param_fw_yr_i.get());
+	const Vector3f rate_d(_param_fw_rr_d.get(), pitch_d, _param_fw_yr_d.get());
+	_rate_control.setPidGains(rate_p, rate_i, rate_d);
+}
+
 void
 FixedwingRateControl::vehicle_manual_poll()
 {
@@ -359,6 +395,7 @@ void FixedwingRateControl::Run()
 				}
 
 				_vehicle_attitude_setpoint_sub.update(&_attitude_sp);
+				updatePitchPidGains();
 				float pitch_rate_ff = _param_fw_pr_ff.get();
 
 				if (_param_fw_pr_ff_lnd.get() >= 0.f

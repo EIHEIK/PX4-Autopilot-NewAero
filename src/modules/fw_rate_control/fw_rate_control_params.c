@@ -93,6 +93,96 @@ PARAM_DEFINE_FLOAT(FW_PR_D, 0.f);
 PARAM_DEFINE_FLOAT(FW_PR_I, 0.1f);
 
 /**
+ * Takeoff pitch rate proportional gain
+ *
+ * A negative value uses FW_PR_P. When enabled, the gain is blended with the
+ * cruise value using the fixed-wing pitch phase schedule.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_P_TKO, -1.f);
+
+/**
+ * Takeoff pitch rate integrator gain
+ *
+ * A negative value uses FW_PR_I. The integrator state is retained while the
+ * gain is blended, avoiding a control discontinuity at the phase boundary.
+ *
+ * @unit %/rad
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_I_TKO, -1.f);
+
+/**
+ * Takeoff pitch rate derivative gain
+ *
+ * A negative value uses FW_PR_D. When enabled, the gain is blended with the
+ * cruise value using the fixed-wing pitch phase schedule.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_D_TKO, -1.f);
+
+/**
+ * Landing pitch rate proportional gain
+ *
+ * A negative value uses FW_PR_P. When enabled, the gain is blended with the
+ * cruise value using the fixed-wing pitch phase schedule.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_P_LND, -1.f);
+
+/**
+ * Landing pitch rate integrator gain
+ *
+ * A negative value uses FW_PR_I. The integrator state is retained while the
+ * gain is blended, avoiding a control discontinuity at the phase boundary.
+ *
+ * @unit %/rad
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_I_LND, -1.f);
+
+/**
+ * Landing pitch rate derivative gain
+ *
+ * A negative value uses FW_PR_D. When enabled, the gain is blended with the
+ * cruise value using the fixed-wing pitch phase schedule.
+ *
+ * @unit %/rad/s
+ * @min -1.0
+ * @max 10
+ * @decimal 3
+ * @increment 0.005
+ * @group FW Rate Control
+ */
+PARAM_DEFINE_FLOAT(FW_PR_D_LND, -1.f);
+
+/**
  * Pitch rate integrator limit
  *
  * @min 0.0

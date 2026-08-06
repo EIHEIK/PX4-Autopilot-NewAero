@@ -98,6 +98,7 @@ px4_add_romfs_files(
 	4027_gz_honghu_wing_150kg_v7
 	4028_gz_honghu_wing_150kg_v8
 	4038_gz_honghu_wing_100kg_v8_xiangyi_test
+	4040_gz_honghu_wing_100kg_v8_cad_audit
 
 	6011_gazebo-classic_typhoon_h480
 	6011_gazebo-classic_typhoon_h480.post

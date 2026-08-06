@@ -192,6 +192,12 @@ private:
 		(ParamFloat<px4::params::FW_PR_IMAX>) _param_fw_pr_imax,
 		(ParamFloat<px4::params::FW_PR_P>) _param_fw_pr_p,
 		(ParamFloat<px4::params::FW_PR_D>) _param_fw_pr_d,
+		(ParamFloat<px4::params::FW_PR_P_TKO>) _param_fw_pr_p_tko,
+		(ParamFloat<px4::params::FW_PR_I_TKO>) _param_fw_pr_i_tko,
+		(ParamFloat<px4::params::FW_PR_D_TKO>) _param_fw_pr_d_tko,
+		(ParamFloat<px4::params::FW_PR_P_LND>) _param_fw_pr_p_lnd,
+		(ParamFloat<px4::params::FW_PR_I_LND>) _param_fw_pr_i_lnd,
+		(ParamFloat<px4::params::FW_PR_D_LND>) _param_fw_pr_d_lnd,
 
 		(ParamFloat<px4::params::FW_RLL_TO_YAW_FF>) _param_fw_rll_to_yaw_ff,
 		(ParamFloat<px4::params::FW_RR_FF>) _param_fw_rr_ff,
@@ -221,6 +227,7 @@ private:
 	 * Update our local parameter cache.
 	 */
 	int		parameters_update();
+	void		updatePitchPidGains();
 
 	void		vehicle_manual_poll();
 	void		vehicle_land_detected_poll();

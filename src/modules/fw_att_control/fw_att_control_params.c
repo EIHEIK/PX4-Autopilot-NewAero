@@ -71,6 +71,36 @@ PARAM_DEFINE_FLOAT(FW_R_TC, 0.4f);
 PARAM_DEFINE_FLOAT(FW_P_TC, 0.4f);
 
 /**
+ * Takeoff attitude pitch time constant
+ *
+ * A negative value uses FW_P_TC. When enabled, the value is blended with the
+ * cruise time constant using the fixed-wing pitch phase schedule.
+ *
+ * @unit s
+ * @min -1.0
+ * @max 2.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_TC_TKO, -1.f);
+
+/**
+ * Landing attitude pitch time constant
+ *
+ * A negative value uses FW_P_TC. When enabled, the value is blended with the
+ * cruise time constant using the fixed-wing pitch phase schedule.
+ *
+ * @unit s
+ * @min -1.0
+ * @max 2.0
+ * @decimal 2
+ * @increment 0.05
+ * @group FW Attitude Control
+ */
+PARAM_DEFINE_FLOAT(FW_P_TC_LND, -1.f);
+
+/**
  * Maximum positive / up pitch rate setpoint
  *
  * @unit deg/s

@@ -147,6 +147,8 @@ private:
 		(ParamFloat<px4::params::FW_P_RMAX_LND>) _param_fw_p_rmax_lnd,
 		(ParamFloat<px4::params::FW_P_RMAX_SLEW>) _param_fw_p_rmax_slew,
 		(ParamFloat<px4::params::FW_P_TC>) _param_fw_p_tc,
+		(ParamFloat<px4::params::FW_P_TC_TKO>) _param_fw_p_tc_tko,
+		(ParamFloat<px4::params::FW_P_TC_LND>) _param_fw_p_tc_lnd,
 		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
 
 		(ParamFloat<px4::params::FW_R_RMAX>) _param_fw_r_rmax,

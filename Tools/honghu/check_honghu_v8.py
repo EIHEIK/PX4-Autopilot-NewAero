@@ -18,6 +18,7 @@ SDF = MODEL / "model.sdf"
 TEST_100_SDF = ROOT / "simulation_models/models/honghu_wing_100kg_v8_xiangyi_test/model.sdf"
 WORLD = ROOT / "Tools/simulation/gz/worlds/honghu_v8.sdf"
 AIRFRAME = ROOT / "ROMFS/px4fmu_common/init.d-posix/airframes/4028_gz_honghu_wing_150kg_v8"
+AIRFRAME_100 = ROOT / "ROMFS/px4fmu_common/init.d-posix/airframes/4038_gz_honghu_wing_100kg_v8_xiangyi_test"
 GZ_INIT = ROOT / "ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim"
 GENERATOR = ROOT / "Tools/honghu/generate_honghu_v8_model.py"
 PROVENANCE = MODEL / "data_provenance.yaml"
@@ -468,6 +469,9 @@ def check_phase_pitch_contract():
         "_param_fw_p_rmax_tko",
         "_param_fw_p_rmax_lnd",
         "_param_fw_p_rmax_slew",
+        "_param_fw_p_tc_tko",
+        "_param_fw_p_tc_lnd",
+        "_pitch_ctrl.set_time_constant(target_time_constant)",
     ):
         if item not in attitude:
             fail(f"missing attitude-control phase-limit contract: {item}")
@@ -478,9 +482,34 @@ def check_phase_pitch_contract():
         "FW_PITCH_MODE_LANDING",
         "_param_fw_pr_ff_rwto.get()",
         "FW_PITCH_MODE_TAKEOFF",
+        "updatePitchPidGains()",
+        "_param_fw_pr_p_tko",
+        "_param_fw_pr_i_tko",
+        "_param_fw_pr_d_tko",
+        "_param_fw_pr_p_lnd",
+        "_param_fw_pr_i_lnd",
+        "_param_fw_pr_d_lnd",
     ):
         if item not in rate:
             fail(f"missing rate-control phase feed-forward contract: {item}")
+
+    airframe_100 = AIRFRAME_100.read_text(encoding="utf-8")
+    for item in (
+        "param set FW_PR_P 1.30",
+        "param set FW_PR_I 0.04",
+        "param set FW_PR_D 0.04",
+        "param set FW_PR_P_TKO 0.90",
+        "param set FW_PR_I_TKO 0.04",
+        "param set FW_PR_D_TKO 0.04",
+        "param set FW_PR_P_LND 0.90",
+        "param set FW_PR_I_LND 0.04",
+        "param set FW_PR_D_LND 0.04",
+        "param set FW_P_TC 0.80",
+        "param set FW_P_TC_TKO 0.80",
+        "param set FW_P_TC_LND 0.80",
+    ):
+        if item not in airframe_100:
+            fail(f"missing 100 kg phase PID contract: {item}")
 
 
 def check_ulog_diagnostics():

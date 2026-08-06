@@ -311,22 +311,24 @@ class DynamicRun:
 
     def _assert_clean_runtime(self) -> None:
         result = subprocess.run(
-            ["pgrep", "-af", "px4|gz sim|gzserver|ruby.*gz"],
+            ["ps", "-eo", "pid=,comm=,args="],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
         active = []
         for line in result.stdout.splitlines():
-            if "pgrep -af" in line:
+            fields = line.strip().split(maxsplit=2)
+            if len(fields) < 2:
                 continue
-            process_id = line.split(maxsplit=1)[0]
+            process_id, command = fields[:2]
+            arguments = fields[2] if len(fields) == 3 else ""
             if process_id == str(os.getpid()):
-                # A standard-plan path contains "px4_reference_docs" and can
-                # match the broad safety expression. Do not mistake this
-                # runner for a pre-existing simulator.
                 continue
-            active.append(line)
+            is_simulator = command in ("px4", "gz", "gzserver")
+            is_gz_ruby_launcher = command == "ruby" and "gz sim" in arguments
+            if is_simulator or is_gz_ruby_launcher:
+                active.append(line.strip())
         if active:
             raise RuntimeError("existing PX4/Gazebo process detected; refusing to disturb it:\n" + "\n".join(active))
 

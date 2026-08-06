@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# @name Canard Honghu Wing 100kg V8 CAD Landing Gear Audit (Gazebo SITL)
+#
+# @type Plane with Canards
+# @class Plane
+#
+# Geometry-only derivative: inherit the complete current 4038 mass and control
+# configuration while selecting the isolated STEP-derived landing-gear model.
+
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=honghu_wing_100kg_v8_cad_audit}
+
+. ${R}etc/init.d-posix/airframes/4038_gz_honghu_wing_100kg_v8_xiangyi_test
