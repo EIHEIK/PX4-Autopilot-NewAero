@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# @name Canard Honghu Wing V8 CAD Landing Gear Audit (Gazebo SITL)
+#
+# @type Plane with Canards
+# @class Plane
+#
+# @maintainer <your-email>
+#
+# Geometry-only derivative: inherit the complete 4028 flight-control baseline
+# while selecting the isolated audit model before 4028 applies its defaults.
+
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=honghu_wing_150kg_v8_cad_audit}
+
+. ${R}etc/init.d-posix/airframes/4028_gz_honghu_wing_150kg_v8
