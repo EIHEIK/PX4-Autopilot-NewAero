@@ -21,6 +21,7 @@ Git 分支和 worktree 中开发。这样可以隔离源码修改、构建产物
 /home/fly/PX4-Autopilot-NewAero/          main（公共集成基线）
 /home/fly/PX4-Autopilot-NewAero-100kg/    variant/honghu-v8-100kg
 /home/fly/PX4-Autopilot-NewAero-150kg/    variant/honghu-v8-150kg
+/home/fly/PX4-Autopilot-NewAero-CAD-audit/ codex/honghu-v8-cad-audit（待退役迁移源）
 
 /home/fly/PX4-Autopilot-NewAero-flight-data/
 ├── 100kg/
@@ -35,8 +36,9 @@ Git仓库。删除或重建worktree前，必须先把需要保留的飞行日志
 
 - `main`：公共集成基线；保存经过两种重量构型共同验证的接口、坐标转换、
   Gazebo桥接、气动与发动机基础模型、日志接口、分析工具和文档。
-- `variant/honghu-v8-100kg`：100 kg模型、参数、控制试验和验收结果。
-- `variant/honghu-v8-150kg`：150 kg模型、参数、控制试验和验收结果。
+- `variant/honghu-v8-100kg`：100 kg模型、参数、控制试验和验收结果；稳定入口4038，CAD试验机4040。
+- `variant/honghu-v8-150kg`：150 kg模型、参数、控制试验和验收结果；稳定入口4028，CAD试验机4039。
+- `codex/honghu-v8-cad-audit`：4039的历史开发来源。2026-08-06完成向150 kg worktree迁移后进入待退役状态，不再作为日常仿真入口。
 
 型号专用改动先保留在对应型号分支。坐标系、执行器映射、气动插件、推进
 插件等公共修复应先在`main`完成，然后分别同步到两个型号分支，并运行两套
@@ -77,9 +79,25 @@ PX4-Autopilot-NewAero-flight-data/100kg/2026-08-04_classic-route/
 PX4-Autopilot-NewAero-flight-data/150kg/2026-08-04_landing-baseline/
 ```
 
+当前已归档：
+
+```text
+PX4-Autopilot-NewAero-flight-data/100kg/2026-08-05-cad-audit-validation/
+PX4-Autopilot-NewAero-flight-data/150kg/2026-08-05-cad-audit-validation/
+```
+
+两处均包含原模型/CAD候选ULog、从ULog导出的初始参数、airframe、任务、摘要和SHA-256。
+
 ## 6. 当前过渡约束
 
 当前4038仍从4028加载公共参数后再覆盖100 kg专用参数，模型生成工具也仍有
 以150 kg为默认目标的历史结构。因此两个型号分支现阶段是开发环境隔离，
 并不代表代码依赖已经彻底解耦。后续应将公共参数提取到独立公共配置，并使
 4028和4038并列加载公共层，避免100 kg继续直接继承150 kg机型文件。
+
+## 7. CAD核查分流
+
+4039和4040分别作为150 kg、100 kg分支试验机长期保留，生产入口不变。临时
+`CAD-audit` worktree只有在其唯一内容全部迁移、4039提交并回归、日志归档校验
+通过且用户明确批准后才可退役。详细事实源为整体参考文档库中的
+`HONGHU_NEWAERO_CAD_AUDIT_MIGRATION_AND_LOG_ARCHIVE_2026-08-06.md`。
